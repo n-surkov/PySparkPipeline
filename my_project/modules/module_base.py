@@ -515,7 +515,7 @@ class StepBase(abc.ABC):
             таблицы, передаваемые в качестве аргументов. Должны соответствовать таблицам из cls.source_table,
             имеющим 'link' == 'argument'
         test : bool
-            флаг для юниттестов, делает все источники аргументами класса
+            если модуль запускается в тестировании, то все self.source_tables понимаются как 'argument'
         logger : logger, optional (default=None)
             При None инициализируется свой логгер
         """
@@ -527,12 +527,7 @@ class StepBase(abc.ABC):
         else:
             self.logger = logger
 
-        # если модуль запускается в тестировании, то все таблицы передаются в качестве аргумента
-        # не стоит запускать тестировочный модуль где-то кроме теста, для которого он инициализировался
         self.test = test
-        if test:
-            for key in self.source_tables:
-                self.source_tables[key]['link'] = 'argument'
 
         self.tables = self.init_tables(argument_tables)
 
@@ -605,7 +600,7 @@ class StepBase(abc.ABC):
                 raise KeyError('table {} already exists in source_tables!'.format(table_name))
 
             # Инициализация spark-таблицы
-            if table_info['link'] != 'argument':
+            if table_info['link'] != 'argument' and not self.test:
                 src_table = self.spark.table(self.config.get_table_link(table_info['link'], True))
             else:
                 try:
