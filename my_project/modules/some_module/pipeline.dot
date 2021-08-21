@@ -1,0 +1,29 @@
+digraph G{
+  graph [fontname="Liberation Serif"]
+  node [shape=rect, fontname="Liberation Serif"]
+  
+  subgraph cluster_sources{
+    label="Исходные данные"
+    src_table_input_table_1 [label=<edw_db<br/>sales_table>]
+  }
+
+
+  subgraph cluster_calculations{
+    label="Вычисления"
+    step0 [label="SomeStep", shape=ellipse]
+    src_table_input_table_1 -> step0
+    interm_table_out_table_1 [label="out_table_1"]
+    step0 -> interm_table_out_table_1
+    step1 [label="AnotherStep", shape=ellipse]
+    interm_table_out_table_1 -> step1
+    interm_table_out_table_2 [label="out_table_2"]
+    step1 -> interm_table_out_table_2
+  }
+
+
+  subgraph cluster_outputs{
+    label="Результат"
+    output_table_out_table_2 [label="out_table_2"]
+    interm_table_out_table_2 -> output_table_out_table_2
+  }
+}
