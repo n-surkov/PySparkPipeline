@@ -395,7 +395,7 @@ class ConfigBase:
             date_of_price_calculation -- в указанном формате
 
         """
-        date = datetime.strptime(self.parameters['date_of_price_calculation'], '%d.%m.%Y').date()
+        date = datetime.strptime(self.parameters['calc_date'], '%d.%m.%Y').date()
         if shift is not None:
             date -= timedelta(shift)
         if date_format == 'datetime':

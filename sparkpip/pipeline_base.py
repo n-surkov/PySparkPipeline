@@ -57,6 +57,7 @@ class PipelineBase(abc.ABC):
                  logger=None,
                  test_arguments=None,
                  skip_structure_check=False,
+                 fix_nulls=True
                  ):
         """
         Parameters
@@ -74,9 +75,12 @@ class PipelineBase(abc.ABC):
             При тестах может появиться необходимость проверить работу частичного пайплана
             (который будет начинаться с шагов, принимающих таблицы в качестве аргументов).
             Такой пайплайн не пройдёт проверку на структуру. Чтобы её пропустить, задать параметр ``True``.
+        fix_nulls: bool, optional (default=True)
+            Чинить ли пустые значения выходных таблиц в соответствии с ulits.convert_to_nulls
         """
         self.spark = spark
         self.config = config
+        self.fix_nulls = fix_nulls
         if logger is None:
             self.logger = LOGGER
             self.config.tune_logger(self.logger)
@@ -494,7 +498,7 @@ digraph G{
             # выбор колонок в соответствии с output_tables
             output[table_name] = current_table.select(*selected_columns)
 
-        return convert_to_null(tables) if self.fix_nulls else tables
+        return convert_to_null(output) if self.fix_nulls else output
 
     def run(self) -> Dict:
         """
