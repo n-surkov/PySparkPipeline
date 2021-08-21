@@ -29,7 +29,7 @@ class StepBase(sparkpip.StepBasePattern):
         logger : logger, optional (default=None)
             При None инициализируется свой логгер
         """
-        super(StepBase, self).__init__(spark, config, argument_tables, test, logger)
+        super().__init__(spark, config, argument_tables, test, logger)
 
     @abc.abstractmethod
     def _calculations(self) -> Dict:
@@ -79,5 +79,5 @@ class PipelineBase(sparkpip.PipelineBasePattern):
         fix_nulls: bool, optional (default=True)
             Чинить ли пустые значения выходных таблиц в соответствии с ulits.convert_to_nulls
         """
-        super(PipelineBase, self).__init__(spark, config, step_sequence, logger,
-                                           test_arguments, skip_structure_check, fix_nulls)
+        super().__init__(spark, config, step_sequence, logger,
+                         test_arguments, skip_structure_check, fix_nulls)

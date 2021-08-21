@@ -164,13 +164,10 @@ which differ from result, calculated at step "{}"'
         pip_intermediate_tables = dict()
 
         for step in self.step_sequence:
-            step_base_name = step.__bases__[0].__name__
-            if step_base_name == 'StepBasePattern':
+            if 'source_tables' in step.__dict__.keys():
                 step_source_tables = step.source_tables
-            elif step_base_name in ['SqlImportBase', 'SqlOnlyImportBase']:
-                step_source_tables = dict()
             else:
-                raise ValueError('Can not recognize step base class "{}"'.format(step_base_name))
+                step_source_tables = dict()
 
             step_output_tables = step.output_tables
 
@@ -514,7 +511,7 @@ digraph G{
 
         for step in self.step_sequence:
             self.logger.debug('"%s" calculations start...', step.__name__)
-            if step.__bases__[0].__name__ == 'StepBasePattern':
+            if 'source_tables' in step.__dict__.keys():
                 if step.__name__ in self.cached_steps:
                     result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=True)
                 else:
