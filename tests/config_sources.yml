@@ -1,0 +1,14 @@
+# Внешние источники
+goods_tbl: 'edw_db.goods_table' # справочник товаров (ссылка)
+sales_tbl: 'edw_db.sales_table' # продажи магазинов (ссылка)
+
+# базы данных продукта
+db_backups:
+    test: 'product_test_db' # база, в куторую сохраняются бэкапы расчётов
+    prod: 'product_prod_db' # база, в куторую сохраняются расчёты
+
+# Бэкапы
+backups: # витрины продукта, слепок которых делается в тестовую базу
+    product_table_1: # алиас таблицы
+        table_name: table_name_in_database # имя таблицы в базе
+        partitionedby: ['date', 'city'] # партиции
