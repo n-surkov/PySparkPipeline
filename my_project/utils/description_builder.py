@@ -20,7 +20,7 @@ import platform
 from importlib import reload
 
 UTILS_PATH = os.path.dirname(__file__)
-PROJECT_PATH = os.path.join(UTILS_PATH, '..', '..')
+PROJECT_PATH = os.path.join(UTILS_PATH, '..')
 MODULES_PATH = os.path.join(PROJECT_PATH, 'modules')
 
 sys.path.append(PROJECT_PATH)
