@@ -272,9 +272,6 @@ class ConfigBasePattern:
 
         self.parameters = vars(parser.parse_args())
 
-        # Чтобы пути к временным таблицам указывались с учётом актуальных параметров
-        self._rich_sources_with_updaters()
-
     # Далее общие полезные функции
     def tune_logger(self, logger):
         """
