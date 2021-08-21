@@ -3,12 +3,14 @@
 Задание класса конфига, адаптированного под конкретный проект
 """
 import os
+import sys
 from datetime import datetime
 import logging
-import sparkpip
 
 # Импорт конфигов
 MODULES_BASE_PATH = os.path.dirname(__file__)
+sys.path.append(os.path.join(MODULES_BASE_PATH, '..', '..'))
+import sparkpip
 CFG_PATH = os.path.join(MODULES_BASE_PATH, '..', 'config.yml')
 CFG_SOURCES = os.path.join(MODULES_BASE_PATH, '..', 'config_sources.yml')
 
