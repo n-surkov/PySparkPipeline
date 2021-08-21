@@ -38,7 +38,7 @@ from .utils import convert_to_null
 LOGGER = logging.getLogger(__name__)
 
 
-class PipelineBase(abc.ABC):
+class PipelineBasePattern(abc.ABC):
     """
     Класс для последовательного выполнения шагов.
 
@@ -165,7 +165,7 @@ which differ from result, calculated at step "{}"'
 
         for step in self.step_sequence:
             step_base_name = step.__bases__[0].__name__
-            if step_base_name == 'StepBase':
+            if step_base_name == 'StepBasePattern':
                 step_source_tables = step.source_tables
             elif step_base_name in ['SqlImportBase', 'SqlOnlyImportBase']:
                 step_source_tables = dict()
@@ -514,7 +514,7 @@ digraph G{
 
         for step in self.step_sequence:
             self.logger.debug('"%s" calculations start...', step.__name__)
-            if step.__bases__[0].__name__ == 'StepBase':
+            if step.__bases__[0].__name__ == 'StepBasePattern':
                 if step.__name__ in self.cached_steps:
                     result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=True)
                 else:

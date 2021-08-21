@@ -34,7 +34,7 @@ class ModuleBaseTest(unittest.TestCase):
         cls.sc = cls.spark.sparkContext
         cls.sql_spark = cls.spark.sql
         cls.sqlContext = SQLContext(cls.sc)
-        cls.config = sparkpip.ConfigBase(CFG_PATH, CFG_SOURCES_PATH)
+        cls.config = sparkpip.ConfigBasePattern(CFG_PATH, CFG_SOURCES_PATH)
         
         columns = ['plu', 'date', 'week', 'price', 'qty']
         values = [
@@ -45,7 +45,7 @@ class ModuleBaseTest(unittest.TestCase):
         ]
         cls.table = cls.spark.createDataFrame(values, columns)
         
-        class FirstStep(sparkpip.StepBase):
+        class FirstStep(sparkpip.StepBasePattern):
             source_tables = {
                 'input_table': {
                     'link': 'link_for_input_table',
@@ -80,7 +80,7 @@ class ModuleBaseTest(unittest.TestCase):
             
         cls.first_step_class = FirstStep
 
-        class SecondStep(sparkpip.StepBase):
+        class SecondStep(sparkpip.StepBasePattern):
             source_tables = {
                 'interm_table': {
                     'link': 'argument',
@@ -254,7 +254,7 @@ class ModuleBaseTest(unittest.TestCase):
             ('qty', 'double')
         ]
 
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,
@@ -275,7 +275,7 @@ class ModuleBaseTest(unittest.TestCase):
         
     def test_pipeline_wrong_step_argument(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,
@@ -301,7 +301,7 @@ class ModuleBaseTest(unittest.TestCase):
     def test_pipeline_wrong_interm_column(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         self.second_step_class.source_tables['interm_table']['columns'].append(('nocol', 'string', 'nocol', None))
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,
@@ -331,7 +331,7 @@ class ModuleBaseTest(unittest.TestCase):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         old_col = self.second_step_class.source_tables['interm_table']['columns'][0]
         self.second_step_class.source_tables['interm_table']['columns'][0] = ('plu_code', 'double', 'plu_code', None)
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,
@@ -358,7 +358,7 @@ class ModuleBaseTest(unittest.TestCase):
             
     def test_pipeline_wrong_output_column(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,
@@ -387,7 +387,7 @@ class ModuleBaseTest(unittest.TestCase):
             
     def test_pipeline_wrong_output_column_type(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
-        class Pipeline(sparkpip.PipelineBase):
+        class Pipeline(sparkpip.PipelineBasePattern):
             output_tables = {
                 'output_table': {
                     'link': None,

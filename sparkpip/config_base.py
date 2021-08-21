@@ -14,35 +14,11 @@
 """
 
 import argparse
-import os
 from datetime import datetime, timedelta
-
-import codecs
-import yaml
+from .utils import config_loader
 
 
-def config_loader(path_to_config):
-    """
-    Загрузка файла конфига *.yml
-    Parameters
-    ----------
-    path_to_config : str
-        путь к файлу с конфигами
-
-    Returns
-    -------
-    out : dict
-        словарь с конфигами
-    """
-
-    if not os.path.exists(path_to_config):
-        raise FileExistsError('can not find config file in {}.'.format(path_to_config))
-
-    with codecs.open(path_to_config, 'r', "utf-8") as ymlfile:
-        return yaml.load(ymlfile, Loader=yaml.FullLoader)
-
-
-class ConfigBase:
+class ConfigBasePattern:
     """
     Класс для работы с параметрами настройки в продукте ценообразования
 

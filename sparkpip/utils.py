@@ -1,8 +1,32 @@
 # -*- coding: utf-8 -*-
+import os
+import codecs
+import yaml
 from pyspark.sql.functions import col as spark_col
 from pyspark.sql.functions import when as spark_when
 from pyspark.sql.functions import isnan as spark_isnan
 from typing import Dict
+
+
+def config_loader(path_to_config):
+    """
+    Загрузка файла конфига *.yml
+    Parameters
+    ----------
+    path_to_config : str
+        путь к файлу с конфигами
+
+    Returns
+    -------
+    out : dict
+        словарь с конфигами
+    """
+
+    if not os.path.exists(path_to_config):
+        raise FileExistsError('can not find config file in {}.'.format(path_to_config))
+
+    with codecs.open(path_to_config, 'r', "utf-8") as ymlfile:
+        return yaml.load(ymlfile, Loader=yaml.FullLoader)
 
 
 def convert_to_null(tables: Dict) -> Dict:

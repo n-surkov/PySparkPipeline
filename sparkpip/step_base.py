@@ -78,7 +78,7 @@ TYPES_MAPPING = {
 }
 
 
-class SqlOnlyImportBase(abc.ABC):
+class SqlOnlyImportBasePattern(abc.ABC):
     """
     Класс для импорта таблиц с помощью sql запросов
 
@@ -188,7 +188,7 @@ class SqlOnlyImportBase(abc.ABC):
         return {self.output_table_name: result}
 
 
-class StepBase(abc.ABC):
+class StepBasePattern(abc.ABC):
     """
     Класс произведения вычислений с таблицами Spark
 
@@ -452,7 +452,7 @@ class StepBase(abc.ABC):
         return result
 
 
-class SqlImportBase(abc.ABC):
+class SqlImportBasePattern(abc.ABC):
     """
     Крайне не рекомендуемый для использования класс. Лучше использовать:
     * SqlOnlyImportBase -- для запросов в виде чистого sql
