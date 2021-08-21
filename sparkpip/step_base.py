@@ -63,7 +63,7 @@ from pyspark.sql.types import (StructField, StructType,
                                TimestampType, LongType,
                                BooleanType)
 from typing import Dict
-from utils import convert_to_null
+from .utils import convert_to_null
 
 LOGGER = logging.getLogger(__name__)
 

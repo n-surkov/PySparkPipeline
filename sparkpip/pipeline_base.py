@@ -33,7 +33,7 @@ import logging
 import random
 from datetime import datetime
 from typing import Dict, List, Tuple
-from utils import convert_to_null
+from .utils import convert_to_null
 
 LOGGER = logging.getLogger(__name__)
 
