@@ -7,18 +7,16 @@ python3 -m unittest test/final_monitoring.py
 """
 import unittest
 import os
-import sys
-DIRNAME = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(DIRNAME, '..'))
-CFG_PATH = os.path.join(DIRNAME, 'config.yml')
-CFG_SOURCES_PATH = os.path.join(DIRNAME, 'config_sources.yml')
-
-import sparkpip
 import numpy as np
 import logging
 from datetime import datetime
 from pyspark.sql.functions import col as spark_col
 from pyspark.sql import SparkSession, SQLContext
+import sparkpip
+
+DIRNAME = os.path.dirname(os.path.abspath(__file__))
+CFG_PATH = os.path.join(DIRNAME, 'config.yml')
+CFG_SOURCES_PATH = os.path.join(DIRNAME, 'config_sources.yml')
 
 LOGGER = logging.getLogger(__name__)
 
