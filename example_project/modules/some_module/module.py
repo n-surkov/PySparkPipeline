@@ -2,53 +2,59 @@ import pyspark.sql.functions as F
 from modules.module_base import StepBase, PipelineBase
 
 
-class SomeStep(StepBase):
-    # название шага и его описание обязательно должны быть разделены пустой строкой для корректного парсинга
+class Processing(StepBase):
     """
-    Название шага
-
-    Описание вычислений класса в формате Markdown
+    Предобработка данных датасета "Титаник"
+    
+    С данными из датасета "Титаник" производятся следующие операции:
+    * Для каждого класса билетов вычисляется средний возраст пассажиров, купивших билет
+    * Если возраст пассажира не указан, то он заменяется средним возрастом пассажиров, 
+    купивших билет такого же класса (с округлением до целого)
     """
     source_tables = {  # словарь описаний источников
         'input_table_1': {  # имя, по которому можно будет обращаться к таблице при описании вычислений
-            'link': 'sales_tbl',  # ссылка на таблицу (можно алиасом из config_sources, как здесь),
-            # 'argument' если таблица не из БД
+            'link': 'titanic_tbl',  # ссылка на таблицу (можно алиасом из config_sources, как здесь), 
+                                    # 'argument' если таблица не из БД
             'description': 'Таблица для теста',  # описание таблицы
             'columns': [  # список колонок
-                ('zrtpluid', 'string', 'plu', None),  # имя, тип колонки в таблице, новое имя, новый тип
-                ('zprice', 'double', 'price', None),
+                ('Survived', 'bigint', 'survived', 'int'), # имя, тип колонки в таблице, новое имя, новый тип
+                ('Pclass', 'bigint', 'ticket_class', 'int'),
+                ('Sex', 'string', 'sex', None),
+                ('Age', 'double', 'age', None),
             ]
         }
     }
-
+    
     output_tables = {
         'out_table_1': {
             'link': None,  # ссылка на таблицу (можно алиасом из config_sources), для дальнейшего сохранения
             'description': 'Таблица после теста',
             'columns': [
-                ('plu', 'string'),  # имя и тип колонки в выхоной таблице таблице
-                ('price', 'double'),
-                ('double_price', 'double'),
+                ('survived', 'int'), # имя и тип колонки в выхоной таблице
+                ('sex', 'string'),
+                ('age', 'double'),
             ]
         }
     }
-
+    
     def _calculations(self):
         "Вычисления класса, на выходе словарь в соответствии с self.output_tables"
+        w = Window.partitionBy('ticket_class')
         df = (
             self.tables['input_table_1']
-                .withColumn('double_price', F.col('price') * 2)
-                .withColumn('price', F.round('price', 0))
+            .withColumn('avg_age', F.mean('age').over(w))
+            .withColumn('age', F.when(F.col('age').isNull(), F.round(F.col('avg_age'), 0)).otherwise(F.col('age')))
         )
         return {'out_table_1': df}
 
 
-class AnotherStep(StepBase):
+class CalcStats(StepBase):
     """
-    Шаг, описание которого осталось за скобками
+    Вычисление статистик по пассажирам Титаника
 
-    Делает то же, что и предыдущий:
-    * удавивает цену, записывает результат в колонку `double_price`
+    Данные таблицы `out_table_1` группируются по полу пассажира и вычисляются следующие статистики:
+    * процент выживаемости
+    * средний возраст
     """
     source_tables = {  # словарь описаний источников
         'out_table_1': {  # имя, по которому можно будет обращаться к таблице при описании вычислений
@@ -56,8 +62,9 @@ class AnotherStep(StepBase):
             # 'argument' если таблица не из БД
             'description': 'Таблица для теста',  # описание таблицы
             'columns': [  # список колонок
-                ('plu', 'string', 'plu', None),  # имя, тип колонки в таблице, новое имя, новый тип
-                ('price', 'double', 'price', None),
+                ('survived', 'int', 'survived', None),  # имя, тип колонки в таблице, новое имя, новый тип
+                ('sex', 'string', 'sex', None),
+                ('age', 'double', 'age', None),
             ]
         }
     }
@@ -67,9 +74,9 @@ class AnotherStep(StepBase):
             'link': None,  # ссылка на таблицу (можно алиасом из config_sources), для дальнейшего сохранения
             'description': 'Таблица после теста',
             'columns': [
-                ('plu', 'string'),  # имя и тип колонки в выхоной таблице таблице
-                ('price', 'double'),
-                ('double_price', 'double'),
+                ('sex', 'string'),  # имя и тип колонки в выхоной таблице
+                ('avg_age', 'double'),  
+                ('survival_percentage', 'double')
             ]
         }
     }
@@ -78,10 +85,15 @@ class AnotherStep(StepBase):
         "Вычисления класса, на выходе словарь в соответствии с self.output_tables"
         df = (
             self.tables['out_table_1']
-                .withColumn('double_price', F.col('price') * 2)
-                .withColumn('price', F.round('price', 0))
+            .groupby('sex')
+            .agg(
+                F.mean('age').alias('avg_age'),
+                F.count('survived').cast('double').alias('pass_cnt'),
+                F.sum('survived').cast('double').alias('survived_cnt')
+            )
+            .withColumn('survival_percentage', F.round(100 * F.col('survived_cnt') / F.col('pass_cnt'), 2))
         )
-        # Проверяем факт попадания параметра --vas в конфиг
+        # Пример использования параметров конфига в шаге. Проверяем факт попадания параметра --vas в конфиг.
         if self.config['validateAS'] == 1:
             self.logger.debug('Вычисления провалидированы')
         else:
@@ -98,8 +110,8 @@ class Pipeline(PipelineBase):
     Общее описание всего пайплайна вычислений
     """
     step_sequence = [
-        SomeStep,
-        AnotherStep
+        Processing,
+        CalcStats
     ]
 
     output_tables = {  # Аналогично описанию в Step
@@ -107,8 +119,9 @@ class Pipeline(PipelineBase):
             'link': None,
             'description': 'Финальная таблица',
             'columns': [
-                ('plu', 'string'),
-                ('double_price', 'double'),
+                ('sex', 'string'),
+                ('avg_age', 'double'),  
+                ('survival_percentage', 'double')
             ]
         }
     }
