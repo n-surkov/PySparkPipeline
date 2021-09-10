@@ -4,17 +4,17 @@ digraph G{
   
   subgraph cluster_sources{
     label="Исходные данные"
-    src_table_input_table_1 [label=<edw_db<br/>sales_table>]
+    src_table_input_table_1 [label=<edw_db<br/>titanic_table>]
   }
 
 
   subgraph cluster_calculations{
     label="Вычисления"
-    step0 [label="SomeStep", shape=ellipse]
+    step0 [label="Processing", shape=ellipse]
     src_table_input_table_1 -> step0
     interm_table_out_table_1 [label="out_table_1"]
     step0 -> interm_table_out_table_1
-    step1 [label="AnotherStep", shape=ellipse]
+    step1 [label="CalcStats", shape=ellipse]
     interm_table_out_table_1 -> step1
     interm_table_out_table_2 [label="out_table_2"]
     step1 -> interm_table_out_table_2

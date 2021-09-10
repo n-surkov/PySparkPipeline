@@ -1,4 +1,5 @@
 import pyspark.sql.functions as F
+from pyspark.sql import Window
 from modules.module_base import StepBase, PipelineBase
 
 
@@ -15,7 +16,7 @@ class Processing(StepBase):
         'input_table_1': {  # имя, по которому можно будет обращаться к таблице при описании вычислений
             'link': 'titanic_tbl',  # ссылка на таблицу (можно алиасом из config_sources, как здесь), 
                                     # 'argument' если таблица не из БД
-            'description': 'Таблица для теста',  # описание таблицы
+            'description': 'Данные пассажиров титаника',  # описание таблицы
             'columns': [  # список колонок
                 ('Survived', 'bigint', 'survived', 'int'), # имя, тип колонки в таблице, новое имя, новый тип
                 ('Pclass', 'bigint', 'ticket_class', 'int'),
@@ -28,7 +29,7 @@ class Processing(StepBase):
     output_tables = {
         'out_table_1': {
             'link': None,  # ссылка на таблицу (можно алиасом из config_sources), для дальнейшего сохранения
-            'description': 'Таблица после теста',
+            'description': 'Обработанные данные пассажиров титаника',
             'columns': [
                 ('survived', 'int'), # имя и тип колонки в выхоной таблице
                 ('sex', 'string'),
@@ -60,7 +61,7 @@ class CalcStats(StepBase):
         'out_table_1': {  # имя, по которому можно будет обращаться к таблице при описании вычислений
             'link': 'argument',  # ссылка на таблицу (можно алиасом из config_sources),
             # 'argument' если таблица не из БД
-            'description': 'Таблица для теста',  # описание таблицы
+            'description': 'Обработанные данные пассажиров титаника',  # описание таблицы
             'columns': [  # список колонок
                 ('survived', 'int', 'survived', None),  # имя, тип колонки в таблице, новое имя, новый тип
                 ('sex', 'string', 'sex', None),
@@ -72,7 +73,7 @@ class CalcStats(StepBase):
     output_tables = {
         'out_table_2': {
             'link': None,  # ссылка на таблицу (можно алиасом из config_sources), для дальнейшего сохранения
-            'description': 'Таблица после теста',
+            'description': 'Статистики пассажиров титаника',
             'columns': [
                 ('sex', 'string'),  # имя и тип колонки в выхоной таблице
                 ('avg_age', 'double'),  
@@ -105,9 +106,11 @@ class CalcStats(StepBase):
 # Определяем пайплайн
 class Pipeline(PipelineBase):
     """
-    Название пайплана
+    Пайплайн расчёта характеристик пассажиров титаника
 
-    Общее описание всего пайплайна вычислений
+    Расчёт характеристик соответствующих каждому полу пассажиров титаника:
+    * процент выживаемости
+    * средний возраст
     """
     step_sequence = [
         Processing,
