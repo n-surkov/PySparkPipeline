@@ -117,14 +117,14 @@ class Pipeline(PipelineBase):
         CalcStats
     ]
 
-    output_tables = {  # Аналогично описанию в Step
+    output_tables = {  # Аналогично описанию в Step (Опционально можно добавить описание колонки)
         'out_table_2': {
             'link': None,
             'description': 'Финальная таблица',
             'columns': [
-                ('sex', 'string'),
-                ('avg_age', 'double'),  
-                ('survival_percentage', 'double')
+                ('sex', 'string', 'Пол'),
+                ('avg_age', 'double'),
+                ('survival_percentage', 'double', 'Процент выживших')
             ]
         }
     }

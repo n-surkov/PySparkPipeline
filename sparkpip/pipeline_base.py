@@ -47,7 +47,7 @@ class PipelineBasePattern(abc.ABC):
         'link' -- путь к таблице или 'argument', если то таблица передаётся в объект класса
         'description' -- описание таблицы
         'columns' -- информацию о столбцах в виде списка
-        [(имя столбца, тип данных)]
+        [(имя столбца, тип данных, описание колонки (опционально)]
     """
     output_tables = dict()
     step_sequence = []
@@ -260,7 +260,8 @@ which differ from result, calculated at step "{}"'
             else:
                 raise KeyError('pipeline output table "{}" is not calculated'.format(table_name))
 
-            for col, dtype in table_info['columns']:
+            for el in table_info['columns']:
+                col, dtype = el[0], el[1]
                 if (col, dtype) not in columns:
                     raise KeyError('pipeline output table "{}" column "{}" is not calculated'
                                    .format(table_name, col))
@@ -334,14 +335,27 @@ which differ from result, calculated at step "{}"'
                     description += ' ({})'.format(table_descr['description'])
 
                 if print_tables:
+                    have_descr = max(len(column) for column in table_descr['columns']) == 3
                     description += ':\n\n' + tab + '<table>\n' + tab + '  <thead>\n'
-                    description += tab + '  <tr>\n' + tab + \
-                                   '    <th>Название колонки</th><th>Формат</th>\n' + tab + '  </tr>\n'
+                    if have_descr:
+                        description += tab + '  <tr>\n' + tab + \
+                                       '    <th>Название колонки</th><th>Формат</th><th>Описание</th>\n' + \
+                                       tab + '  </tr>\n'
+                    else:
+                        description += tab + '  <tr>\n' + tab + \
+                                       '    <th>Название колонки</th><th>Формат</th>\n' + tab + '  </tr>\n'
 
                     description += tab + '  </thead>\n' + tab + '  <tbody>\n'
-                    table_row = tab + '  <tr>\n' + tab + '    <td>{}</td><td>{}</td>\n' + tab + '  </tr>\n'
 
                     for column in table_descr['columns']:
+                        table_row = tab + '  <tr>\n' + tab + '    '
+                        table_len = 2 + int(have_descr)
+                        for i in range(table_len):
+                            if i < len(column):
+                                table_row += f'<td>{column[i]}</td>'
+                            else:
+                                table_row += f'<td></td>'
+                        table_row += '\n' + tab + '  </tr>\n'
                         description += table_row.format(column[0], column[1])
 
                     description += tab + '  </tbody>\n' + tab + '</table>\n\n'

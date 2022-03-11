@@ -45,18 +45,18 @@
 <table>
   <thead>
   <tr>
-    <th>Название колонки</th><th>Формат</th>
+    <th>Название колонки</th><th>Формат</th><th>Описание</th>
   </tr>
   </thead>
   <tbody>
   <tr>
-    <td>sex</td><td>string</td>
+    <td>sex</td><td>string</td><td>Пол</td>
   </tr>
   <tr>
-    <td>avg_age</td><td>double</td>
+    <td>avg_age</td><td>double</td><td></td>
   </tr>
   <tr>
-    <td>survival_percentage</td><td>double</td>
+    <td>survival_percentage</td><td>double</td><td>Процент выживших</td>
   </tr>
   </tbody>
 </table>
