@@ -7,7 +7,7 @@ setup(
     author='n-surkov',
     license='',
     install_requires=[],
-    setup_requires=['pytest-runner'],
+    setup_requires=['pytest-runner', 'pyspark', 'pyyaml'],
     tests_require=['pytest==4.4.1'],
     test_suite='tests'
 )
