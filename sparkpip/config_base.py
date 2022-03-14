@@ -77,6 +77,8 @@ class ConfigBasePattern:
         self.add_parameter('calc_date', '--calc_date', '-dt',
                            type=str, required=False, default=datetime.today().strftime(calc_date_format), nargs='?',
                            help=f'Current date for algorithms in format {calc_date_format}')
+        # Формат даты расчёта
+        self.calc_date_format = calc_date_format
 
     def __setitem__(self, key, value):
         """
@@ -368,7 +370,7 @@ class ConfigBasePattern:
             date_of_price_calculation -- в указанном формате
 
         """
-        date = datetime.strptime(self.parameters['calc_date'], '%d.%m.%Y').date()
+        date = datetime.strptime(self.parameters['calc_date'], self.calc_date_format).date()
         if shift is not None:
             date -= timedelta(shift)
         if date_format == 'datetime':
