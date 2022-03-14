@@ -571,7 +571,7 @@ digraph G{
         if partitions is not None:
             for part in partitions:
                 if part not in spark_dataframe.columns:
-                    raise ValueError('wrong partitions')
+                    raise ValueError(f'Saving error: there is not partition {part} in table {link}. Table columns: {spark_dataframe.columns}')
 
         # Запись таблицы
         self.logger.debug('start saving table {} in mode {} with partititons {}'.format(link, mode, partitions))
