@@ -505,7 +505,7 @@ digraph G{
         for table_name, table_descr in self.output_tables.items():
             current_table = tables[table_name]
             # колонки для селекта
-            selected_columns = [col for col, _ in table_descr['columns']]
+            selected_columns = [col[0] for col in table_descr['columns']]
             # выбор колонок в соответствии с output_tables
             output[table_name] = current_table.select(*selected_columns)
 
