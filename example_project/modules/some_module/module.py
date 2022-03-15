@@ -18,10 +18,10 @@ class Processing(StepBase):
                                     # 'argument' если таблица не из БД
             'description': 'Данные пассажиров титаника',  # описание таблицы
             'columns': [  # список колонок
-                ('Survived', 'bigint', 'survived', 'int'), # имя, тип колонки в таблице, новое имя, новый тип
+                ('Survived', 'bigint', 'survived', 'int'), # имя, тип колонки в таблице, новое имя (опционально), новый тип (опционально)
                 ('Pclass', 'bigint', 'ticket_class', 'int'),
-                ('Sex', 'string', 'sex', None),
-                ('Age', 'double', 'age', None),
+                ('Sex', 'string', 'sex'),
+                ('Age', 'double', 'age'),
             ]
         }
     }
@@ -31,7 +31,7 @@ class Processing(StepBase):
             'link': None,  # ссылка на таблицу (можно алиасом из config_sources), для дальнейшего сохранения
             'description': 'Обработанные данные пассажиров титаника',
             'columns': [
-                ('survived', 'int'), # имя и тип колонки в выхоной таблице
+                ('survived', 'int'),  # имя и тип колонки в выхоной таблице
                 ('sex', 'string'),
                 ('age', 'double'),
             ]
@@ -63,9 +63,9 @@ class CalcStats(StepBase):
             # 'argument' если таблица не из БД
             'description': 'Обработанные данные пассажиров титаника',  # описание таблицы
             'columns': [  # список колонок
-                ('survived', 'int', 'survived', None),  # имя, тип колонки в таблице, новое имя, новый тип
-                ('sex', 'string', 'sex', None),
-                ('age', 'double', 'age', None),
+                ('survived', 'int'),  # имя, тип колонки в таблице, новое имя (опционально), новый тип (опционально)
+                ('sex', 'string'),
+                ('age', 'double'),
             ]
         }
     }

@@ -218,7 +218,8 @@ which differ from result, calculated at step "{}"'
                     pip_intermediate_tables[table_name]['used'] = True
 
                 # Проверяем на соответствие таблицу аргумента шага с таблицей, которая расчитана на предыдущем шаге
-                for col, dtype, _, _ in table_info['columns']:
+                for col_info in table_info['columns']:
+                    col, dtype = col_info[0], col_info[1]
                     if (col, dtype) not in pip_intermediate_tables[table_name]['columns']:
                         self._raise_dtype_exception(pip_intermediate_tables[table_name]['columns'],
                                                     col,

@@ -345,16 +345,24 @@ class StepBasePattern(abc.ABC):
             selects = []
 
             # Переименовывание столбцов и изменение типов в соответствии с описанием
-            for col, dtype, new_name, new_dtype in table_info['columns']:
+            for col_info in table_info['columns']:
+                col, dtype = col_info[0], col_info[1]
                 # Если таблица присутствует в описании рефакторим её столбцы
                 if (col, dtype) in src_table_dtypes:
-                    selects.append(new_name)
-                    src_table = src_table.withColumnRenamed(col, new_name)
-                    if new_dtype is not None:
-                        src_table = src_table.withColumn(
-                            new_name,
-                            spark_col(new_name).cast(new_dtype)
-                        )
+                    # Если требутеся переименование столбца, переименовываем
+                    if len(col_info) > 2:
+                        new_name = col_info[2]
+                        src_table = src_table.withColumnRenamed(col, new_name)
+                        col = new_name
+
+                    selects.append(col)
+                    # Если требуется поменять тип, меняем
+                    if len(col_info) > 3:
+                        if col_info[3] is not None:
+                            src_table = src_table.withColumn(
+                                col,
+                                spark_col(col).cast(col_info[3])
+                            )
                 # Если колонки из описания нет в таблице -> error
                 else:
                     self._raise_dtype_exception(src_table_dtypes,
