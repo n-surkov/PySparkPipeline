@@ -179,7 +179,7 @@ which differ from result, calculated at step "{}"'
                 if table_name not in pip_source_tables.keys():
                     pip_source_tables[table_name] = {
                         'link': table_info['link'],
-                        'columns': [(col, dtype) for col, dtype, _, _ in table_info['columns']]
+                        'columns': [(col_info[0], col_info[1]) for col_info in table_info['columns']]
                     }
                     continue
 
