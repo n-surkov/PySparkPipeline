@@ -190,7 +190,8 @@ which differ from result, calculated at step "{}"'
                         table_name, step.__name__, table_info['link'], pip_source_tables[table_name]['link']
                     )
 
-                for col, dtype, _, _ in table_info['columns']:
+                for col_info in table_info['columns']:
+                    col, dtype = col_info[0], col_info[1]
                     if (col, dtype) not in pip_source_tables[table_name]['columns']:
                         pip_source_tables[table_name]['columns'].append((col, dtype))
 
