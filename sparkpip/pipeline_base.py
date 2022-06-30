@@ -521,7 +521,8 @@ digraph G{
 
         return convert_to_null(output) if self.fix_nulls else output
 
-    def run(self, autocache: bool = True, cache_ignore_steps: List[str] = []) -> Dict:
+    def run(self, autocache: bool = True, cache_ignore_steps: List[str] = [],
+            not_cache_sql_loaders: bool = True) -> Dict:
         """
         Функция последовательного вычисления шагов пайплайна.
 
@@ -531,7 +532,10 @@ digraph G{
             Использовать ли автоматическое кэширование таблиц пайплайна, которые используются многократно.
         cache_ignore_steps : List[str], optional (default=[])
             Список шагов, для которых автоматическое кэширование не используется.
-            Рекомендуется инициализировать класс пайплайна, в логах он напишет, какие шаги закэшировать. Затем можно вырать шаги, которые кэшировать не нужно.
+            Рекомендуется инициализировать класс пайплайна, в логах он напишет, какие шаги закэшировать.
+            Затем можно вырать шаги, которые кэшировать не нужно.
+        not_cache_sql_loaders : bool, optional (default=True)
+            Не кэшировать SQL-импорты. Дань старой версии.
 
         Returns
         -------
@@ -542,13 +546,19 @@ digraph G{
         script_start_time = datetime.now()
 
         for step in self.step_sequence:
-            self.logger.debug('"%s" calculations start...', step.__name__)
+            cache = False
+            if (
+                    autocache
+                    and (step.__name__ in self.cached_steps)
+                    and (step.__name__ not in cache_ignore_steps)
+                    and (not not_cache_sql_loaders or ('source_tables' in step.__dict__.keys()))
+            ):
+                cache = True
+
+            tag = 'Results will be cached!' if cache else ''
+            self.logger.debug('"%s" calculations start...' + tag, step.__name__)
             if 'source_tables' in step.__dict__.keys():
-                if autocache and (step.__name__ in self.cached_steps) and (step.__name__ not in cache_ignore_steps):
-                    self.logger.debug('Caching results of "%s"...', step.__name__)
-                    result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=True)
-                else:
-                    result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run()
+                result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=cache)
             else:
                 result = step(self.spark, self.config, logger=self.logger).run() if ~self.test else {}
 
