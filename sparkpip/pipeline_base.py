@@ -204,17 +204,23 @@ which differ from result, calculated at step "{}"'
                 if table_name not in pip_intermediate_tables.keys():
                     raise ValueError(
                         'source table "{}" of step "{}" is not calculated at previous steps!'
-                            .format(table_name, step.__name__)
+                        .format(table_name, step.__name__)
                     )
 
                 # Кэшируем таблицу, если она используется неоднократно
                 if pip_intermediate_tables[table_name]['used'] and \
                         pip_intermediate_tables[table_name]['step'] not in self.cached_steps:
                     self.cached_steps.append(pip_intermediate_tables[table_name]['step'])
-                    self.logger.debug(
-                        'results from step "%s" will be cached',
-                        pip_intermediate_tables[table_name]['step']
-                    )
+                    if 'source_tables' not in step.__dict__.keys():
+                        self.logger.debug(
+                            'results from step "%s" may be cached, but will not as default. To cache use .run(not_cache_sql_loaders=True)',
+                            pip_intermediate_tables[table_name]['step']
+                        )
+                    else:
+                        self.logger.debug(
+                            'results from step "%s" will be cached as default',
+                            pip_intermediate_tables[table_name]['step']
+                        )
                 else:
                     pip_intermediate_tables[table_name]['used'] = True
 
@@ -250,9 +256,10 @@ which differ from result, calculated at step "{}"'
 
         if self.cached_steps:
             self.logger.warning(
-                """Be careful with cache! If results from cached steps are huge you can prevent autocache via setting parameters of .run() method:
+                """Be careful with cache! If results from cached steps are huge you can change cache behavior via setting parameters of .run() method:
 * set parameter autocache=False to turn off all autocache
 * set parameter cache_ignore_steps to set list of step names that should NOT be cached
+* set parameter not_cache_sql_loaders=True to allow cache steps, that may be cached, but will not as default
 """
             )
 
