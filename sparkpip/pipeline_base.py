@@ -248,6 +248,14 @@ which differ from result, calculated at step "{}"'
                     'columns': table_info['columns']
                 }
 
+        if self.cached_steps:
+            self.logger.warning(
+                """Be careful with cache! If results from cached steps are huge you can prevent autocache via setting parameters of .run() method:
+* set parameter autocache=False to turn off all autocache
+* set parameter cache_ignore_steps to set list of step names that should NOT be cached
+"""
+            )
+
         # Проверка выходной таблицы
         last_step_tables = self.step_sequence[-1].output_tables
         for table_name, table_info in self.output_tables.items():
@@ -513,9 +521,17 @@ digraph G{
 
         return convert_to_null(output) if self.fix_nulls else output
 
-    def run(self) -> Dict:
+    def run(self, autocache: bool = True, cache_ignore_steps: List[str] = []) -> Dict:
         """
         Функция последовательного вычисления шагов пайплайна.
+
+        Parameters
+        ----------
+        autocache : bool, optional (default=True)
+            Использовать ли автоматическое кэширование таблиц пайплайна, которые используются многократно.
+        cache_ignore_steps : List[str], optional (default=[])
+            Список шагов, для которых автоматическое кэширование не используется.
+            Рекомендуется инициализировать класс пайплайна, в логах он напишет, какие шаги закэшировать. Затем можно вырать шаги, которые кэшировать не нужно.
 
         Returns
         -------
@@ -528,7 +544,8 @@ digraph G{
         for step in self.step_sequence:
             self.logger.debug('"%s" calculations start...', step.__name__)
             if 'source_tables' in step.__dict__.keys():
-                if step.__name__ in self.cached_steps:
+                if autocache and (step.__name__ in self.cached_steps) and (step.__name__ not in cache_ignore_steps):
+                    self.logger.debug('Caching results of "%s"...', step.__name__)
                     result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=True)
                 else:
                     result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run()
