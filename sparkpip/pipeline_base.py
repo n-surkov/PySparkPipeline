@@ -211,9 +211,9 @@ which differ from result, calculated at step "{}"'
                 if pip_intermediate_tables[table_name]['used'] and \
                         pip_intermediate_tables[table_name]['step'] not in self.cached_steps:
                     self.cached_steps.append(pip_intermediate_tables[table_name]['step'])
-                    if 'source_tables' in step.__dict__.keys():
+                    if 'source_tables' not in pip_intermediate_tables[table_name]['step_class'].__dict__.keys():
                         self.logger.debug(
-                            'results from step "%s" may be cached, but will not as default. To cache use .run(not_cache_sql_loaders=True)',
+                            'results from step "%s" may be cached, but will NOT as default. To cache it use .run(not_cache_sql_loaders=True)',
                             pip_intermediate_tables[table_name]['step']
                         )
                     else:
@@ -250,6 +250,7 @@ which differ from result, calculated at step "{}"'
 
                 pip_intermediate_tables[table_name] = {
                     'step': step.__name__,
+                    'step_class': step,
                     'used': False,
                     'columns': table_info['columns']
                 }
