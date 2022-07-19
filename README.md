@@ -11,7 +11,7 @@
 ### Remote
 
 ```bash
-$ python3 -m pip install git+ssh://gitea@gitea.matwey.name/tsagi/pytsagi.git
+$ python3 -m pip install git+ssh://git@github.com:n-surkov/PySparkPipeline.git
 ```
 
 ### Local
