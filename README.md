@@ -17,7 +17,7 @@ $ python3 -m pip install git+ssh://git@github.com:n-surkov/PySparkPipeline.git
 ### Local
 
 ```bash
-$ git clone git@github.com:n-surkov/PySparkPipeline.git
+$ git clone https://github.com/n-surkov/PySparkPipeline.git
 $ python3 -m pip install -e ./PySparkPipeline
 ```
 
