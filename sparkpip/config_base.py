@@ -74,9 +74,10 @@ class ConfigBasePattern:
         # Параметры, которые будут использоваться при парсинге
         self.add_parameter('TEST', '--TEST', type=self.str2bool, const=True, default=False, nargs='?',
                            help='True if calculate on test database')
+        dt_example = datetime.today().strftime(calc_date_format)
         self.add_parameter('calc_date', '--calc_date', '-dt',
                            type=str, required=False, default=datetime.today().strftime(calc_date_format), nargs='?',
-                           help=f'Current date for algorithms in format {calc_date_format}')
+                           help=f'Current date for algorithms in format {dt_example}')
         # Формат даты расчёта
         self.calc_date_format = calc_date_format
 
