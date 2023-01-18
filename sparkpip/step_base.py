@@ -165,7 +165,7 @@ class SqlOnlyImportBasePattern(abc.ABC):
                 .format(col_descr, self.__class__.__name__)
             )
 
-    def run(self, cached=False) -> Dict:
+    def run(self, cached=False, get_table=0) -> Dict:
         """
         Запуск алгоритмов вычислений, описанных в cls.get_sql().
 
@@ -173,11 +173,15 @@ class SqlOnlyImportBasePattern(abc.ABC):
         ----------
         cached : bool
             флаг кэширования таблиц в HDFS
+        get_table: int , optional (default=0)
+            тип возвращаемого результата:
+            0 -- Dict[spark.DataFrame]
+            1 -- spark.DataFrame
 
         Returns
         -------
-        result : dict
-            словарь таблиц с результатами в соотвествии с cls.output_tables
+        result : dict or spark.DataFrame
+            тип зависит от параметра get_table. Результат в соотвествии с cls.output_tables
         """
         sql = self.get_sql()
         result = self.spark.sql(sql)
@@ -185,7 +189,12 @@ class SqlOnlyImportBasePattern(abc.ABC):
         if cached:
             result = result.cache()
 
-        return {self.output_table_name: result}
+        if get_table == 0:
+            output = {self.output_table_name: result}
+        else:
+            output = result
+
+        return output
 
 
 class StepBasePattern(abc.ABC):
@@ -437,7 +446,7 @@ class StepBasePattern(abc.ABC):
                     .format(table_name, self.__class__.__name__)
                 )
 
-    def run(self, cached=False):
+    def run(self, cached=False, get_table=0):
         """
         Запуск алгоритмов вычислений, описанных в cls._calculations().
 
@@ -445,11 +454,15 @@ class StepBasePattern(abc.ABC):
         ----------
         cached : bool
             В случае True все выходные таблицы кэшируются
+        get_table: int , optional (default=0)
+            тип возвращаемого результата:
+            0 -- Dict[spark.DataFrame]
+            > 0 -- порядковый номер таблицы, которую надо вернуть в формате spark.DataFrame
 
         Returns
         -------
         result : dict
-            словарь таблиц с результатами в соотвествии с cls.output_tables
+            тип зависит от параметра get_table. Результат в соотвествии с cls.output_tables
         """
         result = self._calculations()
         self.check_output_tables(result)
@@ -457,7 +470,12 @@ class StepBasePattern(abc.ABC):
             for key, table in result.items():
                 result[key] = table.cache()
 
-        return result
+        if get_table == 0:
+            output = result
+        else:
+            output = list(result.values())[get_table]
+
+        return output
 
 
 class SqlImportBasePattern(abc.ABC):
@@ -571,19 +589,23 @@ class SqlImportBasePattern(abc.ABC):
                     .format(table_name, self.__class__.__name__)
                 )
 
-    def run(self, cached=False):
+    def run(self, cached=False, get_table=0):
         """
         Запуск алгоритмов вычислений, описанных в cls._instructions().
 
         Parameters
         ----------
         cached : bool
-            флаг кэширования таблиц в HDFS
+            В случае True все выходные таблицы кэшируются
+        get_table: int , optional (default=0)
+            тип возвращаемого результата:
+            0 -- Dict[spark.DataFrame]
+            > 0 -- порядковый номер таблицы, которую надо вернуть в формате spark.DataFrame
 
         Returns
         -------
         result : dict
-            словарь таблиц с результатами в соотвествии с cls.output_tables
+            тип зависит от параметра get_table. Результат в соотвествии с cls.output_tables
         """
         result = self._instructions()
         self.check_output_tables(result)
@@ -591,4 +613,9 @@ class SqlImportBasePattern(abc.ABC):
             for key, table in result.items():
                 result[key] = table.cache()
 
-        return result
+        if get_table == 0:
+            output = result
+        else:
+            output = list(result.values())[get_table]
+
+        return output
