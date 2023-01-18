@@ -176,7 +176,7 @@ class ConfigBasePattern:
             else:
                 self.parameters[name] = None
 
-    def print_description(self):
+    def print_description(self, ignore_sources=False):
         """
         Вывод списков настроек и их значений, содержащихся в конфиге, в формате yml.
         """
@@ -207,10 +207,11 @@ class ConfigBasePattern:
         else:
             _print_block('global_config contains:', self.cfg)
 
-        if len(self.cfg_sources) == 0:
-            _print_info('sources_config is empty')
-        else:
-            _print_block('sources_config contains:', self.cfg_sources)
+        if not ignore_sources:
+            if len(self.cfg_sources) == 0:
+                _print_info('sources_config is empty')
+            else:
+                _print_block('sources_config contains:', self.cfg_sources)
 
         if len(self.parameters) == 0:
             _print_info('trhere is no parameters in Config')
