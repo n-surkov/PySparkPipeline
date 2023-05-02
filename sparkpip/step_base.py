@@ -351,20 +351,22 @@ class StepBasePattern(abc.ABC):
                     )
 
             src_table_dtypes = src_table.dtypes
-            selects = []
+            selects_src = []
+            selects_dst = []
 
-            # Переименовывание столбцов и изменение типов в соответствии с описанием
+            # Выбираем нужные столбцы, проверяя типы
             for col_info in table_info['columns']:
                 col, dtype = col_info[0], col_info[1]
                 # Если таблица присутствует в описании рефакторим её столбцы
                 if (col, dtype) in src_table_dtypes:
+                    selects_src.append(col)
+
                     # Если требутеся переименование столбца, переименовываем
                     if len(col_info) > 2:
-                        new_name = col_info[2]
-                        src_table = src_table.withColumnRenamed(col, new_name)
-                        col = new_name
+                        selects_dst.append(col_info[2])
+                    else:
+                        selects_dst.append(col)
 
-                    selects.append(col)
                     # Если требуется поменять тип, меняем
                     if len(col_info) > 3:
                         if col_info[3] is not None:
@@ -378,8 +380,14 @@ class StepBasePattern(abc.ABC):
                                                 col,
                                                 table_name,
                                                 is_source=True)
+            src_table = src_table.select(*selects_src)
 
-            tables[table_name] = src_table.select(selects)
+            # Переименовываем столбцы
+            for col_old, col_new in zip(selects_src, selects_dst):
+                if col_old != col_new:
+                    src_table = src_table.withColumnRenamed(col_old, col_new)
+
+            tables[table_name] = src_table
 
             # Проверка соответствия типов колонок с одинаковыми названиями в разных таблицах
             for col, dtype in tables[table_name].dtypes:
