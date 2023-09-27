@@ -56,26 +56,45 @@ SqlOnlyImportBase -- предназначен для шагов, содержа�
 
 import abc
 import logging
+import re
 from pyspark.sql.functions import col as spark_col
 from pyspark.sql.types import (StructField, StructType,
                                StringType, DoubleType,
                                IntegerType, DateType,
                                TimestampType, LongType,
-                               BooleanType)
+                               BooleanType, DecimalType)
 from typing import Dict
 from .utils import convert_to_null
 
 LOGGER = logging.getLogger(__name__)
 
-TYPES_MAPPING = {
-    'string': StringType(),
-    'double': DoubleType(),
-    'int': IntegerType(),
-    'date': DateType(),
-    'timestamp': TimestampType(),
-    'bigint': LongType(),
-    'boolean': BooleanType()
-}
+
+def TYPES_MAPPING(spark_type_string: str):
+    """
+    Функция перевода текстового описания типа из sparkDF.dtypes в тип pyspark.sql.types
+    Parameters
+    ----------
+    spark_type_string: str, тип данных спарк в текстовом формате
+
+    Returns
+    -------
+    spark_sql_type: pyspark.sql.types, ип данных спарк в текстовом формате pyspark.sql.types
+    """
+    if 'decimal' in spark_type_string:
+        v1, v2 = re.findall(r'\d+', spark_type_string)
+        return DecimalType(int(v1), int(v2))
+
+    types_mapping = {
+        'string': StringType(),
+        'double': DoubleType(),
+        'int': IntegerType(),
+        'date': DateType(),
+        'timestamp': TimestampType(),
+        'bigint': LongType(),
+        'boolean': BooleanType()
+    }
+
+    return types_mapping[spark_type_string]
 
 
 class SqlOnlyImportBasePattern(abc.ABC):
@@ -241,7 +260,7 @@ class StepBasePattern(abc.ABC):
         else:
             raise KeyError('There is no table name "{}" in description!'.format(table_name))
 
-        schema = StructType([StructField(col[0], TYPES_MAPPING[col[1]], True) for col in dtypes])
+        schema = StructType([StructField(col[0], TYPES_MAPPING(col[1]), True) for col in dtypes])
 
         return schema
 
@@ -513,7 +532,7 @@ class SqlImportBasePattern(abc.ABC):
         else:
             raise KeyError('There is no table name "{}" in description!'.format(table_name))
 
-        schema = StructType([StructField(col, TYPES_MAPPING[dtype], True) for col, dtype in dtypes])
+        schema = StructType([StructField(col, TYPES_MAPPING(dtype), True) for col, dtype in dtypes])
 
         return schema
 
