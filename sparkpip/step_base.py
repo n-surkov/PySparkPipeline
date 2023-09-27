@@ -62,7 +62,8 @@ from pyspark.sql.types import (StructField, StructType,
                                StringType, DoubleType,
                                IntegerType, DateType,
                                TimestampType, LongType,
-                               BooleanType, DecimalType)
+                               BooleanType, DecimalType,
+                               ShortType)
 from typing import Dict
 from .utils import convert_to_null
 
@@ -91,6 +92,7 @@ def TYPES_MAPPING(spark_type_string: str):
         'date': DateType(),
         'timestamp': TimestampType(),
         'bigint': LongType(),
+        'smallint': ShortType(),
         'boolean': BooleanType()
     }
 
