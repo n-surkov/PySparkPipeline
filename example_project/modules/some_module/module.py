@@ -119,7 +119,7 @@ class Pipeline(PipelineBase):
 
     output_tables = {  # Аналогично описанию в Step (Опционально можно добавить описание колонки)
         'out_table_2': {
-            'link': None,
+            'link': 'product_table_1',
             'description': 'Финальная таблица',
             'columns': [
                 ('sex', 'string', 'Пол'),

@@ -65,6 +65,15 @@ class ConfigBasePattern:
         self.cfg = config_loader(cfg_path)
         # Источники таблиц
         self.cfg_sources = config_loader(cfg_sources_path)
+        if 'backups' in self.cfg_sources:
+            tables = []
+            for _, descr in self.cfg_sources['backups'].items():
+                table = descr['table_name']
+                if table in tables:
+                    raise ValueError(
+                        f'Ошибка в задании config_sources backups. Таблица {table} встречается более 1 раза.'
+                    )
+                tables.append(table)
         # Вот захотелось тебе добавить параметр и вот сюда его
         self.tmp = dict()
         # Параметры, которые будут использоваться при парсинге
@@ -73,11 +82,13 @@ class ConfigBasePattern:
         self.parameters = dict()
         # Параметры, которые будут использоваться при парсинге
         self.add_parameter('TEST', '--TEST', type=self.str2bool, const=True, default=False, nargs='?',
-                           help='True if calculate on test database')
+                           help='Флаг для выполнения вычислений в тестовой базе.' + \
+                                'Допустимые значения: yes, true, t, y, 1'
+                           )
         dt_example = datetime.today().strftime(calc_date_format)
         self.add_parameter('calc_date', '--calc_date', '-dt',
                            type=str, required=False, default=datetime.today().strftime(calc_date_format), nargs='?',
-                           help=f'Current date for algorithms in format {dt_example}')
+                           help=f'Дата расчёта алгоритма в формате {dt_example}')
         # Формат даты расчёта
         self.calc_date_format = calc_date_format
 
@@ -89,14 +100,20 @@ class ConfigBasePattern:
         в ином случае создастся или заменится значение конфига в атрибуте tmp.
         """
         if key in self.cfg.keys():
-            raise KeyError('parameter "{}" already exists in config file. Use update_config to overwrite.'.format(key))
-        
+            raise KeyError(
+                f'Параметр "{key}" задан в файле config.yaml. Для перезаписи используйте метод update_config.'
+            )
+
         if key in self.cfg_sources.keys():
-            raise KeyError('parameter "{}" already exists in config_sources file. Use update_config to overwrite.'.format(key))
-        
+            raise KeyError(
+                f'Параметр "{key}" задан в файле config_sources.yaml. Для перезаписи используйте метод update_config.'
+            )
+
         if key in self.parameters.keys():
-            raise KeyError('parameter "{}" already exists in parameters for command line parsing. Use update_config to overwrite.'.format(key))
-        
+            raise KeyError(
+                f'Параметр "{key}" задан в качестве параметра конфига. Для перезаписи используйте метод update_config.'
+            )
+
         self.tmp[key] = value
 
     def update_config(self, new_configs):
@@ -139,19 +156,19 @@ class ConfigBasePattern:
         -------
         значение запрашиваемого конфига
         """
-        if item in self.parameters.keys():
+        if item in self.parameters:
             return self.parameters[item]
 
-        if item in self.cfg.keys():
+        if item in self.cfg:
             return self.cfg[item]
 
-        if item in self.cfg_sources.keys():
+        if item in self.cfg_sources:
             return self.cfg_sources[item]
 
-        if item in self.tmp.keys():
+        if item in self.tmp:
             return self.tmp[item]
 
-        raise KeyError('there is no variable "{}" in cfg, cfg_sources, parameters and tmp'.format(item))
+        raise KeyError(f'Переменная "{item}" отсутствует во внутренних параметрах конфига.')
 
     def set_default(self, parameter_name='all'):
         """
@@ -166,7 +183,7 @@ class ConfigBasePattern:
             parameters_names = self.parameters_for_parsing.keys()
         else:
             if parameter_name not in self.parameters_for_parsing.keys():
-                raise KeyError('Config has not parameter {} for parsing'.format(parameter_name))
+                raise KeyError(f'Параметр {parameter_name} отсутствует в параметрах для парсинга')
             parameters_names = [parameter_name]
 
         for name in parameters_names:
@@ -193,7 +210,7 @@ class ConfigBasePattern:
                 if isinstance(val, dict):
                     string += '\n' + tab + key + ' : ' + _dict_for_printing(val, tab + '\t')
                 else:
-                    string += '\n' + tab + key + ' : ' + '{}'.format(val)
+                    string += '\n' + tab + key + ' : ' + str(val)
             return string
 
         def _print_block(info, dictionary):
@@ -203,25 +220,25 @@ class ConfigBasePattern:
             print(separator)
 
         if len(self.cfg) == 0:
-            _print_info('global_config is empty')
+            _print_info('Данные в config.yaml отсутствуют.')
         else:
-            _print_block('global_config contains:', self.cfg)
+            _print_block('Данные в config.yaml содержат следующие параметры:', self.cfg)
 
         if not ignore_sources:
             if len(self.cfg_sources) == 0:
-                _print_info('sources_config is empty')
+                _print_info('Данные в config_sources.yaml отсутствуют.')
             else:
-                _print_block('sources_config contains:', self.cfg_sources)
+                _print_block('Данные в config_sources.yaml содержат следующие параметры:', self.cfg_sources)
 
         if len(self.parameters) == 0:
-            _print_info('trhere is no parameters in Config')
+            _print_info('В конфиге не заданы параметры для парсинга.')
         else:
-            _print_block('parameters contain:', self.parameters)
+            _print_block('Параметры для парсинга содержат следующие значения:', self.parameters)
 
         if len(self.tmp) == 0:
-            _print_info('There is no temporary data in Config')
+            _print_info('В конфиге не задано временных параметров.')
         else:
-            _print_block('temporary data contains:', self.tmp)
+            _print_block('Конфиг содержит следующие временные параметры:', self.tmp)
 
     def add_parameter(self, name, flag, short_flag=None, **argparse_arguments):
         """
@@ -238,12 +255,12 @@ class ConfigBasePattern:
         argparse_arguments : {**kwargs}
             аргументы для парсинга параметра из командной строки
         """
-        if name in self.parameters_for_parsing.keys():
-            raise KeyError('parameter {} already exists'.format(name))
+        if name in self.parameters_for_parsing:
+            raise KeyError(f'Параметр {name} уже задан в параметрах для парсинга.')
 
         for key in argparse_arguments:
             if key not in self.argparse_arguments:
-                raise KeyError("argument {} doesn't exist in argparse".format(key))
+                raise KeyError(f"Аргумента {key} не существует в параметрах argparse")
 
         self.parameters_for_parsing[name] = {'short_flag': short_flag,
                                              'flag': flag,
@@ -266,7 +283,7 @@ class ConfigBasePattern:
         else:
             parameters_for_parsing = self.parameters_for_parsing
 
-        parser = argparse.ArgumentParser(description='list of parameters')
+        parser = argparse.ArgumentParser(description='Список параметров')
 
         for name, descr in parameters_for_parsing.items():
             if descr['short_flag'] is not None:
@@ -321,9 +338,21 @@ class ConfigBasePattern:
 
         """
         database_name = self.get_database()
-
+        # Если будем искать не по алиасу, а по ссылке на таблицу
+        if table_name not in self.cfg_sources['backups']:
+            table_name_gen = table_name.split('.')[-1]
+            for alias, descr in self.cfg_sources['backups'].items():
+                if descr['table_name'] == table_name_gen:
+                    table_name = alias
+        # Получаем список параметров
         tbl_name = self.cfg_sources['backups'][table_name]['table_name']
         partitionedby = self.cfg_sources['backups'][table_name]['partitionedby']
+        if not partitionedby:
+            num_partitions = self.cfg_sources['backups'][table_name].get('num_partition', 0)
+            if num_partitions > 0:
+                partitionedby = [num_partitions]
+            else:
+                partitionedby = []
         link = database_name + '.' + tbl_name
         return database_name, tbl_name, partitionedby, link
 
@@ -399,6 +428,6 @@ class ConfigBasePattern:
         elif string.lower() in ('no', 'false', 'f', 'n', '0'):
             output = False
         else:
-            raise argparse.ArgumentTypeError('Boolean value expected.')
+            raise argparse.ArgumentTypeError('Ожидаю значение типа bool.')
 
         return output
