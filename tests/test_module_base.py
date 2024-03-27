@@ -129,7 +129,7 @@ class ModuleBaseTest(unittest.TestCase):
             is_update = True
         except KeyError as msg:
             is_update = False
-            self.assertEqual(msg.args[0], 'parameter "TEST" already exists in parameters for command line parsing. Use update_config to overwrite.')
+            self.assertEqual(msg.args[0], 'Параметр "TEST" задан в качестве параметра конфига. Для перезаписи используйте метод update_config.')
         self.assertFalse(is_update, 'Не должны обновляться параметры конфига через setitem')
 
     def test_config_update_config(self):
@@ -163,82 +163,86 @@ class ModuleBaseTest(unittest.TestCase):
         yesterday = self.config.get_date(pattern, 1)
         self.assertEqual(today, current_date)
         self.assertNotEqual(yesterday, current_date)
-        
+
     def test_correct_step(self):
         # Проверяем корректность отработки шага
-        step = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+        step = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                      test=True, logger=LOGGER)
         res = step.run()
         cnt = res['interm_table'].count()
         self.assertEqual(cnt, 3)
-        
+
     def test_step_input_table_mismatch(self):
         try:
-            step = self.first_step_class(self.spark, self.config, {'inputt_table': self.table}, 
+            step = self.first_step_class(self.spark, self.config, {'some_table': self.table},
                                          test=True, logger=LOGGER)
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'table "input_table" does not exist in arguments of step "FirstStep"')
-        
+            self.assertEqual(msg.args[0],
+                             'Таблица "input_table" шага "FirstStep" согласно описанию должна передаваться, как аргумент, но отсутствует в аргументах.')
+#
     def test_step_input_type_mismatch(self):
         old_col = self.first_step_class.source_tables['input_table']['columns'][0]
-        self.first_step_class.source_tables['input_table']['columns'][0] = ('plu', 'double', 'plu', None)
+        self.first_step_class.source_tables['input_table']['columns'][0] = ('plu', 'double')
         try:
-            step = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+            step = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                          test=True, logger=LOGGER)
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'column "plu" in source table "input_table" at step "FirstStep" has type "string" which differ from description')
+            self.assertEqual(msg.args[0],
+                             """Ошибка в описании таблицы "input_table" шага "FirstStep":
+Тип колонки "plu" в описании = "double", а в датафрейме = "string".""")
         finally:
             self.first_step_class.source_tables['input_table']['columns'][0] = old_col
-            
+
     def test_step_input_column_mismatch(self):
-        self.first_step_class.source_tables['input_table']['columns'].append(('nocol', 'string', 'nocol', None))
+        self.first_step_class.source_tables['input_table']['columns'].append(('nocol', 'string'))
         try:
-            step = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+            step = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                          test=True, logger=LOGGER)
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'there is no column "nocol" in source table "input_table" at step "FirstStep"')
+            self.assertEqual(msg.args[0],
+                             """Ошибка в описании таблицы "input_table" шага "FirstStep":
+В датафрейме отсутствует колонка "nocol".""")
         finally:
             old_cols = self.first_step_class.source_tables['input_table']['columns'][:-1]
             self.first_step_class.source_tables['input_table']['columns'] = old_cols
-            
+
     def test_step_output_table_mismatch(self):
         self.first_step_class.output_tables['out_table'] = self.first_step_class.output_tables['interm_table']
         try:
-            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                       test=True, logger=LOGGER).run()
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'there is no table "out_table" in result of calculations of step "FirstStep"')
-        
+            self.assertEqual(msg.args[0],
+                             'Таблица "out_table" шага "FirstStep" согласно описанию должна присутствовать в результатах расчёта, но отсутствует.')
+
     def test_step_output_type_mismatch(self):
         old_col = self.first_step_class.output_tables['interm_table']['columns'][0]
         self.first_step_class.output_tables['interm_table']['columns'][0] = ('plu_code', 'double')
         try:
-            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                       test=True, logger=LOGGER).run()
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'column "plu_code" in output table "interm_table" at step "FirstStep" has type "string" which differ from description')
+            self.assertEqual(msg.args[0],
+                             """Ошибка в описании таблицы "interm_table" шага "FirstStep":
+Тип колонки "plu_code" в описании = "double", а в датафрейме = "string".""")
         finally:
             self.first_step_class.output_tables['interm_table']['columns'][0] = old_col
-            
+
     def test_step_output_column_mismatch(self):
         self.first_step_class.output_tables['interm_table']['columns'].append(('nocol', 'string'))
         try:
-            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table}, 
+            _ = self.first_step_class(self.spark, self.config, {'input_table': self.table},
                                       test=True, logger=LOGGER).run()
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'there is no column "nocol" in output table "interm_table" at step "FirstStep"')
+            self.assertEqual(msg.args[0],
+                             """Ошибка в описании таблицы "interm_table" шага "FirstStep":
+В датафрейме отсутствует колонка "nocol".""")
         finally:
             old_cols = self.first_step_class.output_tables['interm_table']['columns'][:-1]
             self.first_step_class.output_tables['interm_table']['columns'] = old_cols
@@ -270,7 +274,7 @@ class ModuleBaseTest(unittest.TestCase):
         self.assertEqual(list(result.keys()), ['output_table'])
         self.assertEqual(output_table.count(), 2)
         self.assertEqual(df_dtypes, output_table.dtypes)
-        
+
     def test_pipeline_wrong_step_argument(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         class Pipeline(sparkpip.PipelineBasePattern):
@@ -293,9 +297,10 @@ class ModuleBaseTest(unittest.TestCase):
             pip = Pipeline(self.spark, self.config, logger=LOGGER)
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'source table "interm_table" of step "SecondStep" is not calculated at previous steps!')
-            
+            self.assertEqual(msg.args[0],
+                             'В ходе построения пайплайна обнаружены следующие ошибки:\n' + \
+                             'Источник "interm_table" шага "SecondStep" не был рассчитан на предыдущих шагах.\n')
+
     def test_pipeline_wrong_interm_column(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         self.second_step_class.source_tables['interm_table']['columns'].append(('nocol', 'string', 'nocol', None))
@@ -319,12 +324,13 @@ class ModuleBaseTest(unittest.TestCase):
             pip = Pipeline(self.spark, self.config, logger=LOGGER, test_arguments={'input_table': self.table})
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'column "nocol" of source table "interm_table" of step "SecondStep" is not calculated at previous steps')
+            self.assertEqual(msg.args[0],
+                             'В ходе построения пайплайна обнаружены следующие ошибки:\n' + \
+                             'Результат "interm_table" шага "FirstStep" не соответствует описанию шага "SecondStep"\n')
         finally:
             old_cols = self.second_step_class.source_tables['interm_table']['columns'][:-1]
             self.second_step_class.source_tables['interm_table']['columns'] = old_cols
-            
+
     def test_pipeline_wrong_interm_column_type(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         old_col = self.second_step_class.source_tables['interm_table']['columns'][0]
@@ -349,11 +355,12 @@ class ModuleBaseTest(unittest.TestCase):
             pip = Pipeline(self.spark, self.config, logger=LOGGER, test_arguments={'input_table': self.table})
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'column "plu_code" in source table "interm_table" of step "SecondStep" has type "string" which differ from result, calculated at step "FirstStep"')
+            self.assertEqual(msg.args[0],
+                             'В ходе построения пайплайна обнаружены следующие ошибки:\n' + \
+                             'Результат "interm_table" шага "FirstStep" не соответствует описанию шага "SecondStep"\n')
         finally:
             self.second_step_class.source_tables['interm_table']['columns'][0] = old_col
-            
+
     def test_pipeline_wrong_output_column(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         class Pipeline(sparkpip.PipelineBasePattern):
@@ -366,7 +373,7 @@ class ModuleBaseTest(unittest.TestCase):
                         ('date', 'date'),
                         ('price', 'double'),
                         ('qty', 'double'),
-                        ('nocol', 'notype')
+                        ('nocol', 'string')
                     ]
                 }
             }
@@ -377,12 +384,13 @@ class ModuleBaseTest(unittest.TestCase):
             pip = Pipeline(self.spark, self.config, logger=LOGGER, test_arguments={'input_table': self.table})
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'pipeline output table "output_table" column "nocol" is not calculated')
+            self.assertEqual(msg.args[0],
+                             'В ходе построения пайплайна обнаружены следующие ошибки:\n' + \
+                             'Результат "output_table" шага "SecondStep" не соответствует описанию выхода пайплайна.\n')
         finally:
             old_cols = self.second_step_class.source_tables['interm_table']['columns'][:-1]
             self.second_step_class.source_tables['interm_table']['columns'] = old_cols
-            
+
     def test_pipeline_wrong_output_column_type(self):
         self.first_step_class.source_tables['input_table']['link'] = 'link_for_input_table'
         class Pipeline(sparkpip.PipelineBasePattern):
@@ -405,8 +413,9 @@ class ModuleBaseTest(unittest.TestCase):
             pip = Pipeline(self.spark, self.config, logger=LOGGER, test_arguments={'input_table': self.table})
             self.assertEqual(1, 0, 'Шаг не должен выполняться!')
         except Exception as msg:
-            self.assertEqual(msg.args[0], 
-                             'pipeline output table "output_table" column "plu_code" is not calculated')
+            self.assertEqual(msg.args[0],
+                             'В ходе построения пайплайна обнаружены следующие ошибки:\n' +
+                             'Результат "output_table" шага "SecondStep" не соответствует описанию выхода пайплайна.\n')
         finally:
             old_cols = self.second_step_class.source_tables['interm_table']['columns'][:-1]
             self.second_step_class.source_tables['interm_table']['columns'] = old_cols

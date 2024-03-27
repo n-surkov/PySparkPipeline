@@ -4,8 +4,8 @@ PipelineBase -- для создания последовательности в�
 -------------------------------------------------------------------------------------
 Основной особенностью Pipeline является то, что он принимает на вход только таблицы из базы данных.
 
-Атрибут класса step_sequence является списком классов (шагов или sql-импортов,
-причём все sql-импорты должны быть в начале последовательности)
+Атрибут класса step_sequence является списком классов (шагов или sql-импортов)
+порядок выполнения шагов согласован с последовательностью шагов в step_sequence
 
 Атрибут output_tables аналогичен предыдущим классам
 
@@ -14,8 +14,7 @@ PipelineBase -- для создания последовательности в�
 * проверяется соответствие таблиц-источников и колонок в них на каждом шаге
   с таблицами, рассчитанными на предыдущих шагах
 * проверяется будут ли результаты каких-либо шагов перезаписаны на последующих шагах
-* готовятся списки используемых в пайпланей таблиц источников HDFS
-* готовятся списки промежуточных таблиц (результатов исполнения шагов пайплайна)
+* собирается граф вычислений в формате nx.DiGraph
 * таблицы, рассчитанные на каком-либо из шагов и используемые более чем в одном из последующих шагов
   автоматически кэшируются
 * проверяется соответствие выходной таблицы пайплайна таблицам, рассчитанным на шагах внутри пайплайна
@@ -30,10 +29,11 @@ PipelineBase -- для создания последовательности в�
 """
 import abc
 import logging
-import random
 from datetime import datetime
-from typing import Dict, List, Tuple
-from .utils import convert_to_null
+from typing import Dict, List
+import networkx as nx
+from .table_description_base import TableDescriptions
+from .step_base import SqlOnlyImportBasePattern
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,15 +48,15 @@ class PipelineBasePattern(abc.ABC):
         'description' -- описание таблицы
         'columns' -- информацию о столбцах в виде списка
         [(имя столбца, тип данных, описание колонки (опционально)]
+    step_sequence -- список шагов пайплайна, которые будут выполняться последовательно
     """
-    output_tables = dict()
+    output_tables = {}
     step_sequence = []
 
     def __init__(self, spark, config,
                  step_sequence=None,
                  logger=None,
                  test_arguments=None,
-                 skip_structure_check=False,
                  fix_nulls=True
                  ):
         """
@@ -71,10 +71,6 @@ class PipelineBasePattern(abc.ABC):
             При None инициализируется свой логгер
         test_arguments: dict, optional (default={})
             словарь таблиц аргументов шагов для тестирования. Передавать только для тестирования!
-        skip_structure_check: bool, optional (default=False)
-            При тестах может появиться необходимость проверить работу частичного пайплана
-            (который будет начинаться с шагов, принимающих таблицы в качестве аргументов).
-            Такой пайплайн не пройдёт проверку на структуру. Чтобы её пропустить, задать параметр ``True``.
         fix_nulls: bool, optional (default=True)
             Чинить ли пустые значения выходных таблиц в соответствии с ulits.convert_to_nulls
         """
@@ -97,335 +93,211 @@ class PipelineBasePattern(abc.ABC):
             self.test = True
             self.argument_tables = test_arguments
 
+        self._output_tables = TableDescriptions(self.output_tables, 'pipeline', config, test=self.test)
+
+        # Создаём граф вычислений
+        self.graph = nx.DiGraph()
+        self.build_graph()
+
         # Список шагов, результаты которых используются в нескольких последующих шагов. Эти таблицы будем кэшировать
         self.cached_steps = []
-
-        # Проходимся по вычислениям пайплайна, ищем невязки и шаги, которые нужно кэшировать.
-        if not skip_structure_check:
-            self.source_tables, self.intermediate_tables = self._check_pipeline_structure()
+        self.update_cache()
 
         # Место для записи результатов вычислений пайплайна
-        self.result = dict()
+        self.result = {}
 
-    def _raise_dtype_exception(self,
-                               table_dtypes: List[tuple],
-                               descr_col: str,
-                               table_name: str,
-                               cur_step: str,
-                               prev_step: str,
-                               ):
+    def build_graph(self):
         """
-        Функция выброса ошибки по несоответствию колонок таблиц-фргументов колонкам таблиц,
-        расчитанных на предыдущих шагах.
+        Формирование графа вычислений пайплайна.
 
-        Применяется после того, как выснилось, что комбинация (имя колонки, тип) проверяемой таблицы
-        отсутствует в предыдущих расчётах, для выброса корректного эксепшна.
+        Граф записывается во внутреннюю переменную `graph`
 
-        Parameters
-        ----------
-        table_dtypes : list of tuples
-            список (имя колонки, тип) проверяемой таблицы
-        descr_col : str
-            имя колонки из описания
-        table_name : str
-            имя проверяемой таблицы
-        cur_step : str
-            Имя текущего шага (для которого проверяется соответствие таблицы)
-        prev_step : str
-            Имя шага, на котором была рассчитана проверяемая таблица-аргумент
+        Названия нод графа формируются по следующему шаблону:
+        * шаг: "step:<название класса шага>"
+        * таблица:
+          "table:<название класса шага, результатом которого является таблица>:<название таблицы>:<путь к таблице>"
         """
-        e_type = 'column "{}" in source table "{}" of step "{}" has type "{}" \
-which differ from result, calculated at step "{}"'
-        e_name = 'column "{}" of source table "{}" of step "{}" is not calculated at previous steps'
+        edges = []
+        arguments = {}
+        errors = ''
+        warns = ''
 
-        for col, dtype in table_dtypes:
-            if col == descr_col:
-                raise ValueError(
-                    e_type.format(col, table_name, cur_step, dtype, prev_step)
-                )
-        raise ValueError(
-            e_name.format(descr_col, table_name, cur_step)
-        )
+        # Составляем связи зависимости шагов
+        for step in self.step_sequence:
+            # Инициализируем шаг, чтобы он проверил корректность таблиц
+            step = step(self.spark, self.config, logger=self.logger, skip_loading=True)
 
-    def _check_pipeline_structure(self) -> Tuple[Dict, Dict]:
+            # Настраиваем связи к шагу
+            for table_name, table_descr in step._source_tables.to_dict().items():
+                step_name = table_descr.step_name
+                # По-умолчанию берём данные из текущего шага
+                src_step = ''
+                src_link = table_descr['link']
+                # Если таблица в аргументах, то нужно её найти
+                if table_descr['link'] == 'argument':
+                    if table_name not in arguments:
+                        errors += f'Источник "{table_name}" шага "{step_name}" не был рассчитан на предыдущих шагах.\n'
+                        continue
+
+                    src_table = arguments[table_name]
+                    # Обновляем данные для ноды
+                    src_step = src_table.step_name
+                    src_link = src_table['link']
+                    # Если нашли, то проверяем на соответствие
+                    if not src_table.is_subset_of(table_descr):
+                        errors += f'Результат "{table_name}" шага "{src_step}" ' + \
+                                  f'не соответствует описанию шага "{step_name}"\n'
+
+                # Добавляем связь
+                edges.append((
+                    f'table:{src_step}:{table_name}:{src_link}',
+                    f'step:{step_name}'))
+
+            # Настраиваем связи из шага
+            for table_name, table_descr in step._output_tables.to_dict().items():
+                step_name = table_descr.step_name
+                table_link = table_descr["link"]
+                # Обновляем аргументы
+                if table_name in arguments:
+                    src_table = arguments[table_name]
+                    src_step = src_table.step_name
+                    warns += f'Результат "{src_table}" шага "{src_step}" будет перезаписан на шаге "{step_name}".\n'
+                arguments[table_name] = table_descr
+                # Добавляем связь
+                edges.append((
+                    f'step:{step_name}',
+                    f'table:{step_name}:{table_name}:{table_link}'))
+
+        # Дополняем выходными таблицами
+        for table_name, table_descr in self._output_tables.to_dict().items():
+            table_link = table_descr["link"]
+            src_step = ''
+            src_link = table_descr["link"]
+            # Проверяем соответствие таблиц
+            if table_name in arguments:
+                src_table = arguments[table_name]
+                src_step = src_table.step_name
+                src_link = src_table['link']
+                if not src_table.is_subset_of(table_descr):
+                    errors += f'Результат "{table_name}" шага "{src_step}" ' + \
+                              'не соответствует описанию выхода пайплайна.\n'
+            else:
+                errors += f'Таблица "{table_name}" пайплайна не была рассчитана на предыдущих шагах.\n'
+            # Добавляем связь
+            edges.append((
+                f'table:{src_step}:{table_name}:{src_link}',
+                f'table:pipeline:{table_name}:{table_link}'))
+
+        # Обрабатываем ошибки
+        if warns:
+            self.logger.warning(warns)
+
+        if errors:
+            raise ValueError('В ходе построения пайплайна обнаружены следующие ошибки:\n' + errors)
+
+        # Формируем граф
+        self.graph.add_edges_from(edges)
+
+        # Проверяем, что все связи в порядке
+        errors = ''
+        for node in self.graph.nodes():
+            if self.graph.out_degree(node) > 0:
+                continue
+            _, step_name, table_name, _ = node.split(':')
+            if step_name == 'pipeline':
+                continue
+            errors += f'Таблица "{table_name}" шага "{step_name}" не используется!\n'
+        if errors:
+            raise ValueError('В ходе построения пайплайна обнаружены следующие ошибки:\n' + errors)
+
+    def get_results_sources(self) -> List[Dict]:
         """
-        Функция формирования информации о таблицах, используемых шагами пайплайна.
+        Поиск источников для результатов расчёта пайплайна
 
         Returns
         -------
-        pip_source_tables : dict
-            информация о таблицах, загружаемых из HDFS
-        pip_intermediate_tables : dict
-            информация о таблицах, рассчитанных на промежуточных шагах
+        relations: List[Dict]
+            связи результатов с источниками {
+                result_table: название таблицы результата,
+                result_link: путь к таблице результата,
+                source_link: путь к таблице источника,
+            }
         """
-        # Создание списка источников HDFS
-        pip_source_tables = dict()
-        # Создание списка промежуточных таблиц
-        pip_intermediate_tables = dict()
+        # Поиск всех начальных и конечных точек
+        start_nodes = []
+        end_nodes = []
 
+        for node in self.graph.nodes():
+            if self.graph.out_degree(node) == 0:  # Узел не имеет исходящих ребер (детей)
+                end_nodes.append(node)
+            elif self.graph.in_degree(node) == 0:  # Узел не имеет входящих ребер (родителей)
+                start_nodes.append(node)
+
+        # Поиск связей
+        relations = []
+        for end_node in end_nodes:
+            for start_node in start_nodes:
+                # Получение всех путей между начальной и конечной точками
+                all_paths = nx.all_simple_paths(self.graph, source=start_node, target=end_node)
+                if list(all_paths):
+                    _, _, _, src_table_link = start_node.split(':')
+                    _, _, dst_table_name, dst_table_link = end_node.split(':')
+                    relations.append({
+                        'result_table': dst_table_name,
+                        'result_link': dst_table_link,
+                        'source_link': src_table_link
+                    })
+        return relations
+
+    def update_cache(self):
+        """
+        Обновление списка кэшируемых шагов на основе графа вычислений.
+
+        Шаги выбираются по принцу: если результат используется более чем в 1 шаге -- кэшируем
+        """
+        # Собираем список всех шагов, результаты которых должны быть закэшированы
+        step_names = []
+        for node in self.graph.nodes():
+            node_description = node.split(':')
+            if node_description[0] == 'step':
+                continue
+            if self.graph.out_degree(node) < 2:
+                continue
+            step_names.append(node_description[1])
+        step_names = set(step_names)
+
+        # Добавляем шаги в список для кэша
+        sql_only_counter = 0
         for step in self.step_sequence:
-            if 'source_tables' in step.__dict__.keys():
-                step_source_tables = step.source_tables
+            step_name = step.__name__
+            # Проверяем на необходимость кэширования
+            if step_name not in step_names:
+                continue
+            # Добавляем в список кэша
+            step_obj = step(self.spark, self.config, logger=self.logger, skip_loading=True)
+            self.cached_steps.append(step)
+            # По умолчанию загрузчики не кешируются
+            if isinstance(step_obj, SqlOnlyImportBasePattern):
+                sql_only_counter += 1
+                self.logger.warning(
+                    f'Результаты шага "{step_name}" используются в нескольких шагах. ' + \
+                    'Но шаг является загрузчиком, поэтому его результаты не кэшируются по-умолчанию. ' + \
+                    'Чтобы включить кэширование, используйте .run(not_cache_sql_loaders=False)'
+                )
             else:
-                step_source_tables = dict()
+                self.logger.warning(
+                    f'Результаты шага "{step_name}" используются в нескольких шагах и будут закешированы'
+                )
 
-            step_output_tables = step.output_tables
-
-            # Обновление и проверка на корректность списка HDFS источников шагов пайплайна
-            for table_name, table_info in step_source_tables.items():
-                if table_info['link'] == 'argument':
-                    continue
-
-                if table_name not in pip_source_tables.keys():
-                    pip_source_tables[table_name] = {
-                        'link': table_info['link'],
-                        'columns': [(col_info[0], col_info[1]) for col_info in table_info['columns']]
-                    }
-                    continue
-
-                # предупреждение, если похожие названия таблиц-источников имеют разные ссылки
-                if table_info['link'] != pip_source_tables[table_name]['link']:
-                    self.logger.debug(
-                        'source table "%s" at step "%s" has link "%s" which is differ from pipeline link "%s"',
-                        table_name, step.__name__, table_info['link'], pip_source_tables[table_name]['link']
-                    )
-
-                for col_info in table_info['columns']:
-                    col, dtype = col_info[0], col_info[1]
-                    if (col, dtype) not in pip_source_tables[table_name]['columns']:
-                        pip_source_tables[table_name]['columns'].append((col, dtype))
-
-            # Проверка на корректность списка аргументов шагов (они же промежуточные шаги пайплайна)
-            for table_name, table_info in step_source_tables.items():
-                if table_info['link'] != 'argument':
-                    continue
-
-                # Проверяем, расчитывался ли аргумент шага на предыдущих шагах
-                if table_name not in pip_intermediate_tables.keys():
-                    raise ValueError(
-                        'source table "{}" of step "{}" is not calculated at previous steps!'
-                        .format(table_name, step.__name__)
-                    )
-
-                # Кэшируем таблицу, если она используется неоднократно
-                if pip_intermediate_tables[table_name]['used'] and \
-                        pip_intermediate_tables[table_name]['step'] not in self.cached_steps:
-                    self.cached_steps.append(pip_intermediate_tables[table_name]['step'])
-                    if 'source_tables' not in pip_intermediate_tables[table_name]['step_class'].__dict__.keys():
-                        self.logger.debug(
-                            'results from step "%s" may be cached, but will NOT as default. To cache it use .run(not_cache_sql_loaders=True)',
-                            pip_intermediate_tables[table_name]['step']
-                        )
-                    else:
-                        self.logger.debug(
-                            'results from step "%s" will be cached as default',
-                            pip_intermediate_tables[table_name]['step']
-                        )
-                else:
-                    pip_intermediate_tables[table_name]['used'] = True
-
-                # Проверяем на соответствие таблицу аргумента шага с таблицей, которая расчитана на предыдущем шаге
-                for col_info in table_info['columns']:
-                    col, dtype = col_info[0], col_info[1]
-                    if (col, dtype) not in pip_intermediate_tables[table_name]['columns']:
-                        self._raise_dtype_exception(pip_intermediate_tables[table_name]['columns'],
-                                                    col,
-                                                    table_name,
-                                                    step.__name__,
-                                                    pip_intermediate_tables[table_name]['step'])
-
-            # Обновление списка промежуточных таблиц
-            for table_name, table_info in step_output_tables.items():
-                if table_name in pip_intermediate_tables.keys():
-                    if pip_intermediate_tables[table_name]['used']:
-                        self.logger.debug(
-                            'table "%s" calculated at step "%s" will be overwritten at step "%s"',
-                            table_name, pip_intermediate_tables[table_name]['step'], step.__name__
-                        )
-                    else:
-                        self.logger.debug(
-                            'table "%s" calculated at step "%s" will be never used and overwritten at step "%s"!',
-                            table_name, pip_intermediate_tables[table_name]['step'], step.__name__
-                        )
-
-                pip_intermediate_tables[table_name] = {
-                    'step': step.__name__,
-                    'step_class': step,
-                    'used': False,
-                    'columns': table_info['columns']
-                }
-
-        if self.cached_steps:
+        if len(self.cached_steps) > sql_only_counter:
             self.logger.warning(
-                """Be careful with cache! If results from cached steps are huge you can change cache behavior via setting parameters of .run() method:
-* set parameter autocache=False to turn off all autocache
-* set parameter cache_ignore_steps to set list of step names that should NOT be cached
-* set parameter not_cache_sql_loaders=True to allow cache steps, that may be cached, but will not as default
+                """Будьте внимательны с кешированием (лучше не кешировать большие таблицы). 
+Параметры кеширования задаются при запуске расчётов `.run()`:
+* autocache=False -- отключение функции автокеширования (не отключает кэширование, которое указано в коде расчётов)
+* cache_ignore_steps -- список шагов, результаты которых кэшироваться не будут
+* not_cache_sql_loaders=True -- отключение кэширования загрузчиков данных (SqlOnlyImportBase)
 """
             )
-
-        # Проверка выходной таблицы
-        last_step_tables = self.step_sequence[-1].output_tables
-        for table_name, table_info in self.output_tables.items():
-            if table_name in last_step_tables.keys():
-                columns = last_step_tables[table_name]['columns']
-            elif table_name in pip_intermediate_tables.keys():
-                columns = pip_intermediate_tables[table_name]['columns']
-                self.logger.debug(
-                    'pipeline output table "%s" is calculated at intermediate step (not last)',
-                    table_name
-                )
-            else:
-                raise KeyError('pipeline output table "{}" is not calculated'.format(table_name))
-
-            for el in table_info['columns']:
-                col, dtype = el[0], el[1]
-                if (col, dtype) not in columns:
-                    raise KeyError('pipeline output table "{}" column "{}" is not calculated'
-                                   .format(table_name, col))
-
-        return pip_source_tables, pip_intermediate_tables
-
-    def get_pipeline_tables(self) -> Tuple[Dict, Dict, Dict]:
-        """
-        Выдача описания таблиц, используемых в пайплайне
-
-        Returns
-        -------
-        self.source_tables : dict
-            информация о таблицах, загружаемых из HDFS
-        self.intermediate_tables : dict
-            информация о таблицах, рассчитанных на промежуточных шагах
-        self.output_tables : dict
-            информация о таблицах, выдаваемых в результате запуска функции self.run()
-        """
-
-        def copy_dict_with_link(tables_dict):
-            output = {}
-            for key, descr in tables_dict.items():
-                output[key] = {}
-                for deep_key, value in tables_dict[key].items():
-                    if deep_key == 'link':
-                        output[key][deep_key] = self.config.get_table_link(tables_dict[key][deep_key], True)
-                    else:
-                        output[key][deep_key] = tables_dict[key][deep_key]
-            return output
-
-        return copy_dict_with_link(self.source_tables), \
-               copy_dict_with_link(self.intermediate_tables), \
-               copy_dict_with_link(self.output_tables)
-
-    def get_pipeline_description(self, print_table_list=True, print_table_descr=True) -> str:
-        """
-        Функция вывода описания пайплайна для wiki
-
-        Вывод производится в стиле юпитерского маркдауна потому, что наше вики маркдауна не знает.
-
-        Parameters
-        ----------
-        print_src_tables : bool, optional (default=True)
-            Вывод таблиц-источников для каждого шага
-        print_out_tables : bool, optional (default=True)
-            Вывод таблиц-результатов для каждого шага
-        Returns
-        -------
-        documentation : str
-            описание алгоритмов пайплайна
-        """
-
-        def get_table_descriptions(tables_description: Dict,
-                                   prev_results: Dict,
-                                   print_tables: bool,
-                                   tab='',
-                                   ) -> str:
-            """
-            Генерация описания таблиц
-            """
-            description = ''
-            for table_name, table_descr in tables_description.items():
-                description += tab + '* {}'.format(table_name)
-                if table_name in prev_results.keys():
-                    description += ' (Результат вычислений шага {})'.format(prev_results[table_name])
-                elif table_descr['link'] is not None:
-                    description += ' ({})'.format(self.config.get_table_link(table_descr['link'], True))
-
-                if table_descr['description']:
-                    description += ' ({})'.format(table_descr['description'])
-
-                if print_tables:
-                    have_descr = max(len(column) for column in table_descr['columns']) == 3
-                    description += ':\n\n' + tab + '<table>\n' + tab + '  <thead>\n'
-                    if have_descr:
-                        description += tab + '  <tr>\n' + tab + \
-                                       '    <th>Название колонки</th><th>Формат</th><th>Описание</th>\n' + \
-                                       tab + '  </tr>\n'
-                    else:
-                        description += tab + '  <tr>\n' + tab + \
-                                       '    <th>Название колонки</th><th>Формат</th>\n' + tab + '  </tr>\n'
-
-                    description += tab + '  </thead>\n' + tab + '  <tbody>\n'
-
-                    for column in table_descr['columns']:
-                        table_row = tab + '  <tr>\n' + tab + '    '
-                        table_len = 2 + int(have_descr)
-                        for i in range(table_len):
-                            if i < len(column):
-                                table_row += f'<td>{column[i]}</td>'
-                            else:
-                                table_row += f'<td></td>'
-                        table_row += '\n' + tab + '  </tr>\n'
-                        description += table_row.format(column[0], column[1])
-
-                    description += tab + '  </tbody>\n' + tab + '</table>\n\n'
-                else:
-                    description += '\n'
-
-            return description + '\n'
-
-        # Головное описание пайплайна
-        head_descriprion = self.__doc__.strip().split('\n')
-        documentation = '# ' + head_descriprion[0] + '\n\n'
-        for line in head_descriprion[min(1, len(head_descriprion)):]:
-            line_strip = line.strip()
-            if line_strip:
-                documentation += line_strip + '\n'
-            else:
-                documentation += '\n'
-        documentation += '\n\n'
-        documentation += '<img src="pipeline.png">\n\n'
-        # Описание шагов
-        documentation += '## Модуль состоит из последовательного выполнения следующих шагов:\n'
-        intermediate_results = dict()
-        for step in self.step_sequence:
-            # Название шага (первая строка в докстринге шага)
-            description = step.__doc__.strip() + '\n'
-            documentation += '* **{}** ({}):\n'.format(step.__name__, description.split('\n')[0])
-
-            # Описание алгоритма шага, указанное в дальнейших строках докстринга
-            documentation += '\n    ' + description[description.find('\n'):].strip() + '\n'
-            table_list_tab = '\t'
-
-            # Перечисление исходных таблиц, если таковые имеются
-            basename = step.__bases__[0].__name__
-            if basename not in ['SqlImportBase', 'SqlOnlyImportBase'] and print_table_list:
-                documentation += '\n    *Исходные таблицы:*\n\n'
-                documentation += get_table_descriptions(step.source_tables, intermediate_results,
-                                                        print_table_descr, table_list_tab)
-            else:
-                documentation += '\n'
-
-            if print_table_list:
-                documentation += '    *Выходные таблицы:*\n\n'
-                documentation += get_table_descriptions(step.output_tables, intermediate_results,
-                                                        print_table_descr, table_list_tab)
-
-            results = {name: step.__name__ for name in step.output_tables}
-            intermediate_results = {**intermediate_results, **results}
-
-        documentation += '\n## Результатом выполнения алгоритма являются следующие таблицы:\n'
-        documentation += get_table_descriptions(self.output_tables, intermediate_results, True)
-
-        return documentation
 
     def get_pipeline_graph(self) -> str:
         """
@@ -447,53 +319,45 @@ digraph G{
         sources = '\n  subgraph cluster_sources{\n    label="Исходные данные"\n'
         calculations = '\n  subgraph cluster_calculations{\n    label="Вычисления"\n'
         outputs = '\n  subgraph cluster_outputs{\n    label="Результат"\n'
-        tables = dict()
 
-        for i, step in enumerate(self.step_sequence):
-            # Перечисление исходных таблиц, если таковые имеются
-            basename = step.__bases__[0].__name__
-            if basename in ['SqlImportBase', 'SqlOnlyImportBase']:
-                sources += '    step{} [label="{}", shape=ellipse]\n'.format(i, step.__name__)
-                for table_name, table_descr in step.output_tables.items():
-                    tables[table_name] = ('src_table_{}'.format(table_name), '"{}"'.format(table_name))
-                    sources += '    {} [label={}]\n'.format(tables[table_name][0],
-                                                            tables[table_name][1])
-                    sources += '    step{} -> {}\n'.format(i, tables[table_name][0])
-                continue
-
-            calculations += '    step{} [label="{}", shape=ellipse]\n'.format(i, step.__name__)
-
-            for table_name, table_descr in step.source_tables.items():
-                if (table_descr['link'] != 'argument') and (table_name not in tables.keys()):
-                    table_link = self.config.get_table_link(table_descr['link'], True)
-                    database, table_link = table_link.split('.')
-                    tables[table_name] = (
-                        'src_table_{}'.format(table_name),
-                        '<{}<br/>{}>'.format(database, table_link)
-                    )
-                    sources += '    {} [label={}]\n'.format(tables[table_name][0],
-                                                            tables[table_name][1])
-
-                calculations += '    {} -> step{}\n'.format(tables[table_name][0], i)
-
-            for table_name, table_descr in step.output_tables.items():
-                if table_name in tables.keys():
-                    tables[table_name] = (
-                        '{}_recalc'.format(tables[table_name][0]),
-                        '"{}"'.format(table_name)
-                    )
+        def print_node(node):
+            """Отрисовка ноды"""
+            node_description = node.split(':')
+            node_name = '_sep_'.join(node_description[:3])
+            if node_description[0] == 'step':
+                label = f'label="{node_description[1]}"'
+                parameters = ', shape=ellipse'
+            else:
+                if node_description[-1]:
+                    label = '<br/>'.join(node_description[-1].split('.'))
+                    label = f'label=<{label}>'
                 else:
-                    tables[table_name] = (
-                        'interm_table_{}'.format(table_name),
-                        '"{}"'.format(table_name)
-                    )
-                calculations += '    {} [label={}]\n'.format(tables[table_name][0],
-                                                             tables[table_name][1])
-                calculations += '    step{} -> {}\n'.format(i, tables[table_name][0])
+                    label = f'label="{node_description[-2]}"'
+                parameters = ''
+            return f'    {node_name} [{label}{parameters}]\n'
 
-        for table_name, table_descr in self.output_tables.items():
-            outputs += '    output_table_{} [label="{}"]\n'.format(table_name, table_name)
-            outputs += '    {} -> output_table_{}\n'.format(tables[table_name][0], table_name)
+        def print_edges(node):
+            """Отрисовка ребра"""
+            node_description = node.split(':')
+            node_name = '_sep_'.join(node_description[:3])
+            edge = ''
+            for src_node in self.graph.pred[node].keys():
+                node_description = src_node.split(':')
+                src_node_name = '_sep_'.join(node_description[:3])
+                edge += f'    {src_node_name} -> {node_name}\n'
+
+            return edge
+
+        for node in self.graph.nodes():
+            if self.graph.in_degree(node) == 0:
+                sources += print_node(node)
+                sources += print_edges(node)
+            elif self.graph.out_degree(node) == 0:
+                outputs += print_node(node)
+                outputs += print_edges(node)
+            else:
+                calculations += print_node(node)
+                calculations += print_edges(node)
 
         sources += '  }\n'
         calculations += '  }\n'
@@ -502,32 +366,58 @@ digraph G{
 
         return graph
 
-    def _make_output_tables(self, tables) -> Dict:
+    def get_pipeline_description(self) -> str:
         """
-        Функция приведения таблиц к нормальному виду.
+        Функция вывода описания пайплайна для wiki
 
-        * Столбцы приводятся в соответствии с ``output_tables`` по порядку колонок
-        * Все NaN'ы приводятся к None
-
-        Parameters
-        ----------
-        tables : dict
-            словарь таблиц, расчитанных на всех шагах пайплайна.
+        Вывод производится в стиле юпитерского маркдауна потому, что наше вики маркдауна не знает.
 
         Returns
         -------
-        output : dict
-            словарь спарковских таблиц, соответствующих ``output_tables``
+        documentation : str
+            описание алгоритмов пайплайна
         """
-        output = dict()
-        for table_name, table_descr in self.output_tables.items():
-            current_table = tables[table_name]
-            # колонки для селекта
-            selected_columns = [col[0] for col in table_descr['columns']]
-            # выбор колонок в соответствии с output_tables
-            output[table_name] = current_table.select(*selected_columns)
+        # Головное описание пайплайна
+        head_descriprion = self.__doc__.strip().split('\n')
+        documentation = '# ' + head_descriprion[0] + '\n\n'
+        for line in head_descriprion[min(1, len(head_descriprion)):]:
+            line_strip = line.strip()
+            if line_strip:
+                documentation += line_strip + '\n'
+            else:
+                documentation += '\n'
+        documentation += '\n\n'
+        documentation += '<img src="pipeline.png">\n\n'
 
-        return convert_to_null(output) if self.fix_nulls else output
+        # Описание шагов
+        def find_sources(node_name):
+            step_sources = {}
+            for src_node in self.graph.pred[node_name].keys():
+                node_description = src_node.split(':')
+                step_sources[node_description[2]] = node_description[1]
+            return step_sources
+
+        documentation += '## Модуль состоит из последовательного выполнения следующих шагов:\n'
+        for step in self.step_sequence:
+            # Инициализируем шаг, чтобы он проверил корректность таблиц
+            step = step(self.spark, self.config, logger=self.logger, skip_loading=True)
+
+            # Ищем аргументы
+            step_node_name = f'step:{step.__class__.__name__}'
+            step_sources = find_sources(step_node_name)
+
+            # Добавляем описание шага
+            documentation += step.get_description(step_sources)
+
+        # Добавляем описание выходных таблиц
+        documentation += '\n## Результатом выполнения алгоритма являются следующие таблицы:\n'
+        step_sources = {}
+        for table_name, table_descr in self._output_tables.to_dict().items():
+            table_node_name = f'table:pipeline:{table_name}:{table_descr["link"]}'
+            step_sources.update(find_sources(table_node_name))
+        documentation += self._output_tables.get_description(step_sources)
+
+        return documentation
 
     def run(self, autocache: bool = True, cache_ignore_steps: List[str] = [],
             not_cache_sql_loaders: bool = True) -> Dict:
@@ -554,24 +444,27 @@ digraph G{
         script_start_time = datetime.now()
 
         for step in self.step_sequence:
+            # инициализируем шаг
+            step_obj = step(self.spark, self.config, argument_tables=tables, logger=self.logger, test=self.test)
+            # рассчитываем необходимость кэширования
             cache = False
             if (
                     autocache
                     and (step.__name__ in self.cached_steps)
                     and (step.__name__ not in cache_ignore_steps)
-                    and (not not_cache_sql_loaders or ('source_tables' in step.__dict__.keys()))
+                    and (
+            not (not_cache_sql_loaders and isinstance(step_obj, SqlOnlyImportBasePattern)))
             ):
                 cache = True
-
-            tag = 'Results will be cached!' if cache else ''
-            self.logger.debug('"%s" calculations start...' + tag, step.__name__)
-            if 'source_tables' in step.__dict__.keys():
-                result = step(self.spark, self.config, tables, logger=self.logger, test=self.test).run(cached=cache)
+            tag = 'Результаты шага будут закешированы!' if cache else ''
+            # Начинаем расчёт
+            self.logger.debug('Рассчитываем шаг "%s"...' + tag, step.__name__)
+            if isinstance(step_obj, SqlOnlyImportBasePattern) and self.test:
+                result = {}
             else:
-                result = step(self.spark, self.config, logger=self.logger).run() if ~self.test else {}
+                result = step_obj.run(cached=cache)
 
-            for table_name, table in result.items():
-                tables[table_name] = table
+            tables.update(result)
 
         script_end_time = datetime.now()
         self.logger.debug('Pipeline calculations start at %s', script_start_time.strftime('%Y-%m-%d: %H:%M:%S'))
@@ -582,11 +475,12 @@ digraph G{
         seconds_delta = (time_delta - hour_delta * 3600) % 60
         self.logger.debug('Whole time %dh %dm %ds', hour_delta, minutes_delta, seconds_delta)
 
-        self.result = self._make_output_tables(tables)
+        self.result = self._output_tables.load_tables(self.spark, tables)
 
         return self.result
 
-    def write_dataframe_hive(self, spark_dataframe, link, mode, partitions=None, parts_n=None):
+    def write_dataframe_hive(self, spark_dataframe, link, mode, partitions=None, parts_n=None,
+                             insert=False, disable_repartition=False):
         """
         Функция записи спарковского датафрейма в HIVE
 
@@ -597,47 +491,76 @@ digraph G{
         link : str
             полный путь к таблице
         mode : str
-            как записывать таблицу
+            как записывать таблицу ('overwrite', 'append')
         partitions : list, optional (default=None)
             список полей, по которым будет производиться партиционирование
         parts_n : int, optional (default=None)
             количество партиций при записи
             None -- дефолтное количество, определяемое при инициализации спарка
+        insert: bool
+            использовать мод .insertInto(mode=mode)
+        disable_repartition: bool, optional (default=False)
+            отключение репартиционирования таблицы перед записью.
         """
         # Проверка партиций на адекватность
         if partitions is not None:
             for part in partitions:
                 if part not in spark_dataframe.columns:
-                    raise ValueError(f'Saving error: there is not partition {part} in table {link}. Table columns: {spark_dataframe.columns}')
+                    raise ValueError(
+                        f'Ошибка при сохранении таблицы: Партиция "{part}" таблицы "{link}" отсутствует в данных.' + \
+                        f'Список колонок таблицы: {spark_dataframe.columns}')
+
+        # Создание таблицы в случае если она не существует, но потребуется
+        if (not self.spark.catalog._jcatalog.tableExists(link)) and insert:
+            LOGGER.warning(f'Таблица "{link}" отсутствует в БД. Начинаю создание таблицы...')
+            sdf = self.spark.createDataFrame([], schema=spark_dataframe.schema)
+            if partitions is not None:
+                sdf.write.saveAsTable(link, mode='overwrite', partitionBy=partitions)
+            else:
+                sdf.write.saveAsTable(link, mode='overwrite')
+
+        # В случае дополнения таблицы лучше восстановить порядок колонок
+        if insert:
+            init_columns = spark_dataframe.columns
+            table_columns = self.spark.table(link).columns
+            columns_diff = set(init_columns).symmetric_difference(set(table_columns))
+            if columns_diff:
+                raise ValueError(
+                    f'Не могу записать таблицу "{link}" в моде insert из-за несоответствия колонок.' + \
+                    f'Список не совпадающих колонок: {columns_diff}'
+                )
+            spark_dataframe = spark_dataframe.select(table_columns)
+
+        # Репартиционирование таблицы
+        if not disable_repartition:
+            if partitions is not None:
+                if parts_n is not None:
+                    spark_dataframe = spark_dataframe.repartition(parts_n, partitions)
+                else:
+                    spark_dataframe = spark_dataframe.repartition(*partitions)
+            elif parts_n is not None:
+                spark_dataframe = spark_dataframe.repartition(parts_n)
 
         # Запись таблицы
-        self.logger.debug('start saving table {} in mode {} with partititons {}'.format(link, mode, partitions))
-        if partitions is not None:
-            if parts_n is not None:
-                spark_dataframe = spark_dataframe.repartition(parts_n, partitions)
-            else:
-                spark_dataframe = spark_dataframe.repartition(*partitions)
-
-            if mode == 'insert':
-                spark_dataframe.write.insertInto(link)
-            else:
-                spark_dataframe.write.partitionBy(partitions).mode(mode).saveAsTable(link)
+        self.logger.debug(f'Начинаю сохранение таблицы "{link}". mode={mode}, partititons={partitions}...')
+        writer = spark_dataframe.write
+        if insert:
+            is_overwrite = mode == 'overwrite'
+            writer.insertInto(link, overwrite=is_overwrite)
         else:
-            if mode == 'insert':
-                spark_dataframe.write.insertInto(link)
-            else:
-                spark_dataframe.write.mode(mode).saveAsTable(link)
+            writer = writer.mode(mode)
+            if partitions is not None:
+                writer = writer.partitionBy(partitions)
+            writer.saveAsTable(link)
 
-    def write_dataframe_hive_over_tmp(self, table_name, link, mode, partitions=None, parts_n=None):
+    def write_dataframe_hive_over_tmp(self, table_name, link, mode, partitions=None, parts_n=None,
+                                      insert=False, update_parameters={}):
         """
         Функция записи спарковского датафрейма в HIVE через временную таблицу:
 
         * датафрейм ``self.result[table_name]`` записывается во временную таблицу
         * датафрейм ``self.result[table_name]`` удаляется и создаётся датафрейм из временной таблицы
         * датафрейм из временной таблицы записывается по адресу ``link`` и удаляется
-
-        Такая последовательность осуществляется в случае, если таблица ``link`` является исходником для вычисления
-        ``self.result[table_name]``
 
         Parameters
         ----------
@@ -649,47 +572,81 @@ digraph G{
             как записывать таблицу
         partitions : list, optional (default=None)
             список полей, по которым будет производиться партиционирование
+            По-умолчанию партиции отсутствуют.
         parts_n : int, optional (default=None)
             количество партиций при записи
-            None -- дефолтное количество, определяемое при инициализации спарка
+            По-умолчанию -- дефолтное количество, определяемое при инициализации спарка
+        insert: bool
+            использовать мод .insertInto(mode=mode)
+        update_parameters: Dict, optional (default={})
+            `keys` -- список ключей по которым нужно произвести обновление
+            `filter` -- дополнительный фильтр на исходную таблицу
         """
         # Генерируем имя временной таблицы так, чтобы оно не совпадало с уже существующей таблицей
         test_base = self.config.cfg_sources['db_backups']['test'] + '.'
-        tmp_table_link = test_base + self.logger.name.replace('.', '_') + \
-                         '_tmp_table_' + self.config.get_date('%Y_%m_%d') + '_' + str(random.randint(1000, 9999))
-
-        for i in range(10):
-            if not self.spark.catalog._jcatalog.tableExists(tmp_table_link):
-                break
-            tmp_table_link = tmp_table_link[:-4] + str(random.randint(1000, 9999))
-        else:
-            raise KeyError('can not create tmp table after 10 attempts')
+        tag = f"_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+        tmp_table_link = test_base + link.split('.')[1] + '_tmp_table' + tag
+        # На случай, если мод обновления update нужно будет куда-то записывать старые данные
+        tmp_table_link_add = test_base + link.split('.')[1] + '_tmp_table_add' + tag
 
         # Записываем результат во временную таблицу
-        self.logger.debug('saving result to temporary table %s', tmp_table_link)
+        self.logger.debug(f'Сохраняю результат во временную таблицу {tmp_table_link}...')
         self.write_dataframe_hive(self.result[table_name], tmp_table_link, 'overwrite', partitions, parts_n)
 
-        # Удаляем записанный датафрейм и создаём датафрейм из временной таблицы
-        output = self.spark.table(tmp_table_link)
-        del self.result[table_name]
+        # В случае update мода докидываем данные предыдущего результата с исключением новых данных
+        if mode == 'update':
+            if 'keys' not in update_parameters:
+                raise ValueError(
+                    'При записи в режиме update необходимо задать список ключей для обновления ' + \
+                    '(update_parameters["keys"] = [col1, col2...])'
+                )
+            src_table = self.spark.table(link)
+            if 'filter' in update_parameters:
+                src_table = src_table.filter(update_parameters['filter'])
+
+            old_data = (
+                src_table.join(
+                    self.spark.table(tmp_table_link).select(update_parameters['keys']),
+                    on=update_parameters['keys'],
+                    how='left_anti'
+                )
+            )
+            self.logger.debug(f'Сохраняю старые данные во временную таблицу {tmp_table_link_add}...')
+            self.write_dataframe_hive(old_data, tmp_table_link_add, 'overwrite', partitions, parts_n)
+
+        # Формируем результат
+        if mode == 'update':
+            columns = self.spark.table(link).columns
+            output = (
+                self.spark.table(tmp_table_link).select(columns)
+                .union(self.spark.table(tmp_table_link_add).select(columns))
+            )
+        else:
+            output = self.spark.table(tmp_table_link)
 
         # Записываем данные из временной таблицы в link.
         try:
-            self.write_dataframe_hive(output, link, mode, partitions, parts_n)
-        except Exception as msg:
-            # Удаляем временную таблицу в случаем неудачной записи.
-            self.logger.debug('can not rewrite table "%s"', link)
-            self.logger.debug('removing temporary table "%s"', tmp_table_link)
-            self.spark.sql('DROP TABLE ' + tmp_table_link)
-            raise msg
-
-        # Удаляем временную таблицу.
-        del output
-        self.logger.debug('removing temporary table %s', tmp_table_link)
-        self.spark.sql('DROP TABLE {}'.format(tmp_table_link))
+            if mode == 'update':
+                self.write_dataframe_hive(output, link, 'overwrite', partitions, parts_n, insert=True)
+            else:
+                self.write_dataframe_hive(output, link, mode, partitions, parts_n, insert=insert)
+            self.logger.debug('Процесс записи завешён, удаляю временные таблицы...')
+        except Exception as exception:
+            # Удаляем временные таблицы в случаем неудачной записи.
+            self.logger.error(f'Не получилось записать таблицу "{link}"! Удаляю временные таблицы...')
+            raise exception
+        finally:
+            del self.result[table_name]
+            sql = 'DROP TABLE IF EXISTS ' + tmp_table_link
+            self.logger.debug(sql)
+            self.spark.sql(sql)
+            sql = 'DROP TABLE IF EXISTS ' + tmp_table_link_add
+            self.logger.debug(sql)
+            self.spark.sql(sql)
 
     def save_result_to_hive(self, table_name='all', num_partitions=None, partitions=None,
-                            save_mode='append', table_link=None, use_tmp_table=False):
+                            save_mode='append', insert=False, table_link=None, use_tmp_table=False,
+                            update_parameters={}, disable_repartition=False):
         """
         Модуль сохранение результатов вычислений пайплайна в HIVE
 
@@ -700,14 +657,32 @@ digraph G{
             'all' -- в случае записи всех таблиц, указанных в ``output_tables``
         num_partitions : int, optional (default=None)
             количество партиций при записи
-            None -- дефолтное количество, определяемое при инициализации спарка
+            По-умолчанию -- дефолтное количество из конфига (config_sources)
+            В случае отсутствия конфига берётся `spark.sql.shuffle.partitions`
         partitions : list, optional (default=None)
             список полей, по которым будет производиться партиционирование
+            По-умолчанию -- партиции из конфига (config_sources)
         save_mode : str, optional (default='append')
-            как записывать таблицу
+            как записывать таблицу:
+            * 'overwrite' -- перезапись
+            * 'append' -- добавление в существующую таблицу. При отсутствие таблицы работает, как 'overwrite'
+            * 'update' -- обновление данных в таблице по ключам update_parameters['keys'].
+              Работать будет долго, так как это не дефолтный метод спарка.
+        insert: bool
+            использовать мод .insertInto(mode=mode)
         table_link : str, optional (default=None)
             полный путь к таблице или имя таблицы в соответствии с config_sources.
-            None -- путь будет браться из описания ``output_tables``
+            По-умолчанию -- путь будет браться из описания ``output_tables``
+        use_tmp_table: bool
+            Запись через временную таблицу.
+            По-умолчанию запись через временную таблицу используется при попытке записи в таблицу,
+            которая используется в качестве источника расчёта.
+        update_parameters: Dict, optional (default={})
+            `keys` -- список ключей по которым нужно произвести обновление
+            `filter` -- дополнительный фильтр на исходную таблицу
+        disable_repartition: bool, optional (default=False)
+            отключение репартиционирования таблицы перед записью.
+            Лучше не использовать без ясного понимания, что перед записью датафрейм партиционирован нормально
         """
         # Засекаем время
         saving_start_time = datetime.now()
@@ -715,38 +690,112 @@ digraph G{
                           table_name,
                           saving_start_time.strftime('%Y-%m-%d: %H:%M:%S'))
 
-        def save_table(tbl_name, link, mode, parts_n, parts):
-            """
-            Функция сохранения одной таблицы из self.result
-            """
-            # Определяем параметры сохранения таблицы
-            link = self.output_tables[tbl_name]['link'] if link is None else link
-            # Определяем параметры записи при наличии таблицы в бэкапах
-            try:
-                _, _, default_parts, default_link = self.config.get_table_description(link)
-                default_parts = None if not default_parts else default_parts
-                link = default_link if len(link.split('.')) != 2 else link
-                parts = default_parts if parts is None else parts
-            except KeyError:
-                self.logger.debug('Table "%s" description is not found in backups', link)
-            # Если таблицы нет в бэкапах пытаемся получить её ссылку из конфига, иначе оставляем без изменений
-            link = self.config.get_table_link(link, quiet_mode=True)
+        # Проверка режима записи
+        available_modes = ['overwrite', 'append', 'update']
+        if save_mode not in available_modes:
+            raise ValueError(
+                f'Недопустимое значение параметра save_mode "{save_mode}". Возможные значения: {available_modes}'
+            )
 
-            if link is None:
-                raise ValueError('there is no table link in arguments, output_tables or cfg_sources')
+        # Проверка наличия необходимых параметров режима update
+        if save_mode == 'update':
+            if 'keys' not in update_parameters:
+                raise ValueError(
+                    'При записи в режиме update необходимо задать список ключей для обновления ' + \
+                    '(update_parameters["keys"] = [col1, col2...])'
+                )
+            if 'filter' not in update_parameters:
+                self.logger.warning(
+                    'Для ускорения записи в режиме update лучше задать параметры фильтрации данных.' + \
+                    'В противном случае обновление потребует перезаписи всей целевой таблицы.'
+                )
 
-            # Сохраняем таблицу
-            if use_tmp_table:
-                self.write_dataframe_hive_over_tmp(tbl_name, link, mode, parts, parts_n)
-            else:
-                self.write_dataframe_hive(self.result[tbl_name], link, mode, parts, parts_n)
-
-        # Начинаем сохранение результатов
+        # Формируем список таблиц для записи
         if table_name == 'all':
-            for key in self.output_tables:
-                save_table(key, table_link, save_mode, num_partitions, partitions)
+            tables_to_write = self._output_tables.to_dict()
         else:
-            save_table(table_name, table_link, save_mode, num_partitions, partitions)
+            tables_to_write = {
+                table_name: self._output_tables.to_dict().get(table_name, None)
+            }
+            if tables_to_write[table_name] is None:
+                raise ValueError(f'Таблица "{table_name}" отсутствует в описании выходных таблиц пайплайна')
+
+        # Проверка на конфликт параметров при нескольких таблицах
+        if len(tables_to_write.keys()) != 1:
+            if (
+                (num_partitions is not None)
+                or (partitions is not None)
+                or (save_mode == 'update')
+                or (table_link is not None)
+                or disable_repartition
+            ):
+                raise KeyError(
+                    'Параметры "num_partitions", "partitions", "table_link", "save_mode", "disable_repartition" ' + \
+                    'не поддерживаются в режиме записи всех таблиц-результатов пайплайна (table_name == "all").'
+                )
+
+        # Начинаем процесс записи
+        for tbl_name, table_description in tables_to_write.items():
+            default_link = self.config.get_table_link(table_description['link'], quiet_mode=True)
+
+            # Формируем адрес для записи таблицы
+            if table_link is not None:
+                table_link = self.config.get_table_link(table_link, quiet_mode=True)
+                if table_link != default_link:
+                    self.logger.warning(
+                        'Путь для записи таблицы был задан отличным от конфига! ' + \
+                        f'Таблица будет записана по адресу {table_link}.'
+                    )
+            else:
+                table_link = self.config.get_table_link(table_description['link'], quiet_mode=True)
+
+            # Задаём параметры партиционирования
+            if (partitions is None) and (num_partitions is None):
+                _, _, default_parts, _ = self.config.get_table_description(table_link)
+                if default_parts:
+                    if isinstance(default_parts[0], str):
+                        partitions = default_parts
+                    if isinstance(default_parts[0], int):
+                        num_partitions = default_parts[0]
+
+            # Определяем необходимость записи через временную таблицу
+            if not use_tmp_table:
+                relations = self.get_results_sources()
+                for rel in relations:
+                    if (rel['result_table'] == tbl_name) and (rel['result_link'] == rel['source_link']):
+                        use_tmp_table = True
+                        self.logger.warning(
+                            f'Таблица {tbl_name} будет записана в {table_link} через временную, ' + \
+                            'так как использует себя в качестве источника расчёта.'
+                        )
+                        break
+
+            # Запись
+            if use_tmp_table or (save_mode == 'update'):
+                if disable_repartition:
+                    self.logger.warning(
+                        'В случае записи результата через временную таблицу режим disable_repartition не работает.'
+                    )
+                self.write_dataframe_hive_over_tmp(
+                    tbl_name, table_link, save_mode,
+                    partitions=partitions,
+                    parts_n=num_partitions,
+                    insert=insert,
+                    update_parameters=update_parameters
+                )
+            else:
+                self.write_dataframe_hive(
+                    self.result[tbl_name], table_link, save_mode,
+                    partitions=partitions,
+                    parts_n=num_partitions,
+                    insert=insert,
+                    disable_repartition=disable_repartition
+                )
+
+            # Если нужно записать более 1 таблицы, обновляем параметры
+            num_partitions = None
+            partitions = None
+            table_link = None
 
         # Выключаем таймер, выводим инфу в лог
         saving_end_time = datetime.now()
