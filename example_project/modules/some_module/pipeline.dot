@@ -4,26 +4,26 @@ digraph G{
   
   subgraph cluster_sources{
     label="Исходные данные"
-    src_table_input_table_1 [label=<edw_db<br/>titanic_table>]
+    table_sep__sep_input_table_1 [label=<edw_db<br/>titanic_table>]
   }
 
 
   subgraph cluster_calculations{
     label="Вычисления"
-    step0 [label="Processing", shape=ellipse]
-    src_table_input_table_1 -> step0
-    interm_table_out_table_1 [label="out_table_1"]
-    step0 -> interm_table_out_table_1
-    step1 [label="CalcStats", shape=ellipse]
-    interm_table_out_table_1 -> step1
-    interm_table_out_table_2 [label="out_table_2"]
-    step1 -> interm_table_out_table_2
+    step_sep_Processing [label="Processing", shape=ellipse]
+    table_sep__sep_input_table_1 -> step_sep_Processing
+    table_sep_Processing_sep_out_table_1 [label="out_table_1"]
+    step_sep_Processing -> table_sep_Processing_sep_out_table_1
+    step_sep_CalcStats [label="CalcStats", shape=ellipse]
+    table_sep_Processing_sep_out_table_1 -> step_sep_CalcStats
+    table_sep_CalcStats_sep_out_table_2 [label="out_table_2"]
+    step_sep_CalcStats -> table_sep_CalcStats_sep_out_table_2
   }
 
 
   subgraph cluster_outputs{
     label="Результат"
-    output_table_out_table_2 [label="out_table_2"]
-    interm_table_out_table_2 -> output_table_out_table_2
+    table_sep_pipeline_sep_out_table_2 [label=<product_prod_db<br/>table_name_in_database>]
+    table_sep_CalcStats_sep_out_table_2 -> table_sep_pipeline_sep_out_table_2
   }
 }

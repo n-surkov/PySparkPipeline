@@ -14,7 +14,7 @@ class StepBase(sparkpip.StepBasePattern):
     """
     Класс типа ШАГ, адаптированный под конкретный проект
     """
-    def __init__(self, spark, config, argument_tables=None, test=False, logger=None):
+    def __init__(self, spark, config, argument_tables=None, test=False, logger=None, skip_loading=False):
         """
         Parameters
         ----------
@@ -29,7 +29,7 @@ class StepBase(sparkpip.StepBasePattern):
         logger : logger, optional (default=None)
             При None инициализируется свой логгер
         """
-        super().__init__(spark, config, argument_tables, test, logger)
+        super().__init__(spark, config, argument_tables, test, logger, skip_loading)
 
     @abc.abstractmethod
     def _calculations(self) -> Dict:
@@ -57,7 +57,6 @@ class PipelineBase(sparkpip.PipelineBasePattern):
                  step_sequence=None,
                  logger=None,
                  test_arguments=None,
-                 skip_structure_check=False,
                  fix_nulls=True
                  ):
         """
@@ -72,12 +71,8 @@ class PipelineBase(sparkpip.PipelineBasePattern):
             При None инициализируется свой логгер
         test_arguments: dict, optional (default={})
             словарь таблиц аргументов шагов для тестирования. Передавать только для тестирования!
-        skip_structure_check: bool, optional (default=False)
-            При тестах может появиться необходимость проверить работу частичного пайплана
-            (который будет начинаться с шагов, принимающих таблицы в качестве аргументов).
-            Такой пайплайн не пройдёт проверку на структуру. Чтобы её пропустить, задать параметр ``True``.
         fix_nulls: bool, optional (default=True)
             Чинить ли пустые значения выходных таблиц в соответствии с ulits.convert_to_nulls
         """
         super().__init__(spark, config, step_sequence, logger,
-                         test_arguments, skip_structure_check, fix_nulls)
+                         test_arguments, fix_nulls)

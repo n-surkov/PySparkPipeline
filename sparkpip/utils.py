@@ -1,11 +1,14 @@
+"""
+Утилиты для модулей
+"""
 # -*- coding: utf-8 -*-
 import os
 import codecs
+from typing import Dict
 import yaml
 from pyspark.sql.functions import col as spark_col
 from pyspark.sql.functions import when as spark_when
 from pyspark.sql.functions import isnan as spark_isnan
-from typing import Dict
 
 
 def config_loader(path_to_config):
@@ -23,7 +26,7 @@ def config_loader(path_to_config):
     """
 
     if not os.path.exists(path_to_config):
-        raise FileExistsError('can not find config file in {}.'.format(path_to_config))
+        raise FileExistsError(f'Файла {path_to_config}, заданного в качестве пути к конфигу, не существует.')
 
     with codecs.open(path_to_config, 'r', "utf-8") as ymlfile:
         return yaml.load(ymlfile, Loader=yaml.FullLoader)
@@ -48,7 +51,7 @@ def convert_to_null(tables: Dict) -> Dict:
     output : dict
         словарь обработанных спарковских таблиц
     """
-    output = dict()
+    output = {}
     for table_name, table in tables.items():
         dtypes = table.dtypes
         # числовые колонки

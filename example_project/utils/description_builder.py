@@ -75,7 +75,7 @@ def make_descriptions(rel_path='', modules_list=[]):
 
         # Создаём описание
         with open(os.path.join(current_path, 'README.md'), 'w') as fo:
-            fo.write(pipline.get_pipeline_description(True, False))
+            fo.write(pipline.get_pipeline_description())
 
         # Создаём dot-граф вычислений
         with open(os.path.join(current_path, 'pipeline.dot'), 'w') as fo:
